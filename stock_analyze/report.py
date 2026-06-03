@@ -193,8 +193,38 @@ def render_dossier(pack: dict[str, Any], scorecard: dict[str, Any]) -> str:
 
 
 def render_watchlist_report(results: list[dict[str, Any]]) -> str:
-    lines = ["# 观察池对比报告", "", "## 核心结论", ""]
+    lines = ["# 观察池对比报告", "", "## 横向对比", ""]
     ranked = sorted(results, key=lambda item: item["scorecard"]["scores"]["total"], reverse=True)
+    lines.append(
+        "| 股票 | 评级 | 总分 | 趋势 | 量价 | 基本面 | 估值 | 资金流 | 市场环境 | 风险 | 数据质量 |"
+    )
+    lines.append(
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |"
+    )
+    for item in ranked:
+        sc = item["scorecard"]
+        scores = sc["scores"]
+        audit = (item.get("pack") or {}).get("data_audit") or {}
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    str(sc["symbol"]),
+                    str(sc["rating"]),
+                    _score_cell(scores.get("total")),
+                    _score_cell(scores.get("trend")),
+                    _score_cell(scores.get("volume_price")),
+                    _score_cell(scores.get("fundamental")),
+                    _score_cell(scores.get("valuation")),
+                    _score_cell(scores.get("moneyflow")),
+                    _score_cell(scores.get("market_context")),
+                    _score_cell(scores.get("risk")),
+                    _data_quality_text(audit),
+                ]
+            )
+            + " |"
+        )
+    lines.extend(["", "## 核心结论", ""])
     for idx, item in enumerate(ranked, 1):
         sc = item["scorecard"]
         ev = sc.get("evidence") or {}
@@ -203,16 +233,23 @@ def render_watchlist_report(results: list[dict[str, Any]]) -> str:
             f"- **第 {idx} 档 {sc['symbol']}**：评级 {sc['rating']}，总分 {sc['scores']['total']}/100，交易日 {sc['trade_date']}，"
             f"20日涨跌幅 {ev.get('ret_20d_pct')}%，5日资金净流入 {ev.get('moneyflow_net_amount_5d')}，风险标记 {len(flags)} 个。"
         )
-    lines.extend(["", "## 分项评分", ""])
-    for item in ranked:
-        sc = item["scorecard"]
-        scores = sc["scores"]
-        lines.append(
-            f"- **{sc['symbol']}**：趋势 {scores.get('trend')}/100，基本面 {scores.get('fundamental')}/100，"
-            f"估值 {scores.get('valuation')}/100，资金流 {scores.get('moneyflow')}/100，风险 {scores.get('risk')}/100。"
-        )
     lines.extend(["", "## 风险提示", "", "- 观察池报告只做横向研究排序，不构成买入推荐。", "- 如需单票详细证据，请查看各股票目录下的 `report.md` 和 `market_pack.json`。"])
     return "\n".join(lines) + "\n"
+
+
+def _score_cell(value: Any) -> str:
+    return "" if value is None else f"{value}/100"
+
+
+def _data_quality_text(audit: dict[str, Any]) -> str:
+    if not audit:
+        return "未知"
+    gaps = int(audit.get("data_gaps_count") or 0)
+    if gaps == 0:
+        return "完整"
+    if gaps <= 2:
+        return f"少量缺口({gaps})"
+    return f"缺口较多({gaps})"
 
 
 def _summary(pack: dict[str, Any], scorecard: dict[str, Any]) -> str:

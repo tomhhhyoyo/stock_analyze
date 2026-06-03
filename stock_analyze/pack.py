@@ -35,6 +35,8 @@ def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDat
         "macd": macd(closes),
         "bollinger20": bollinger(closes, 20),
         "atr14": atr(highs, lows, closes, 14),
+        "max_drawdown60": max_drawdown(closes, 60),
+        "volatility20": volatility(closes, 20),
         "max_drawdown_60d_pct": max_drawdown(closes, 60),
         "volatility_20d_pct": volatility(closes, 20),
         "vol_ma5": moving_average(volumes, 5),

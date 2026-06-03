@@ -39,6 +39,8 @@ def run_analysis(text: str, out_dir: Path = Path("output"), provider: MarketData
 
 def _build_raw_data(pack: dict[str, Any]) -> dict[str, Any]:
     return {
+        "provider": pack["meta"].get("source"),
+        "generated_at": pack["meta"].get("as_of"),
         "meta": {
             "symbol": pack["meta"]["symbol"],
             "trade_date": pack["meta"]["trade_date"],

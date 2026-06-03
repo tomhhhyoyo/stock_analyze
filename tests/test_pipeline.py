@@ -80,9 +80,17 @@ def test_run_single_stock_analysis(tmp_path: Path):
     assert "data_contract" in pack
     assert "data_audit" in pack
     assert pack["indicators"]["bollinger20"]["middle"] is not None
+    assert pack["indicators"]["atr14"] is not None
+    assert pack["indicators"]["max_drawdown60"] is not None
+    assert pack["indicators"]["volatility20"] is not None
     raw = json.loads((tmp_path / "600519.SH" / "raw_data.json").read_text(encoding="utf-8"))
+    assert raw["provider"] == "static"
+    assert raw["generated_at"]
+    assert "basic" in raw
     assert "financials" in raw
+    assert "announcements" in raw
     assert "moneyflow" in raw
+    assert "market_context" in raw
     report = (tmp_path / "600519.SH" / "report.md").read_text(encoding="utf-8")
     assert "资金流分析" in report
     assert "公告与事件风险" in report
@@ -132,7 +140,7 @@ def test_run_watchlist_analysis(tmp_path: Path):
     run_analysis("/观察池 600519.SH、300750.SZ，做多维对比", tmp_path, provider)
 
     text = (tmp_path / "watchlist_report.md").read_text(encoding="utf-8")
-    assert "分项评分" in text
+    assert "| 股票 | 评级 | 总分 | 趋势 | 量价 | 基本面 | 估值 | 资金流 | 市场环境 | 风险 | 数据质量 |" in text
     assert "不构成买入推荐" in text
 
 

@@ -168,15 +168,20 @@ def load_scoring_config(path: str | Path = "config/scoring_weights.json") -> dic
     config_path = Path(path)
     if not config_path.exists():
         return DEFAULT_SCORING_CONFIG
-    data = json.loads(config_path.read_text(encoding="utf-8"))
-    merged = json.loads(json.dumps(DEFAULT_SCORING_CONFIG))
-    for key, value in data.items():
-        if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key].update(value)
-        else:
-            merged[key] = value
-    _validate_weights(merged["weights"])
-    return merged
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return DEFAULT_SCORING_CONFIG
+        merged = json.loads(json.dumps(DEFAULT_SCORING_CONFIG))
+        for key, value in data.items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key].update(value)
+            else:
+                merged[key] = value
+        _validate_weights(merged["weights"])
+        return merged
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+        return DEFAULT_SCORING_CONFIG
 
 
 def _validate_weights(weights: dict[str, float]) -> None:
