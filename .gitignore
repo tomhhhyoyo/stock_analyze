@@ -17,6 +17,8 @@ htmlcov/
 
 # Runtime outputs
 output/
+config/symbol_cache.json
+data_cache/
 
 # Local secrets and env files
 .env

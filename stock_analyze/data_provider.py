@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import json
 import os
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from .models import DailyBar
+
+CACHE_DIR = Path("data_cache")
+INDUSTRY_INDEX_MAP_PATH = Path("config/industry_index_map.json")
 
 
 class MarketDataProvider(Protocol):
@@ -26,7 +31,7 @@ class MarketDataProvider(Protocol):
     def fetch_moneyflow(self, symbol: str, start_date: date, end_date: date) -> dict:
         ...
 
-    def fetch_market_context(self, trade_date: str | None = None) -> dict:
+    def fetch_market_context(self, trade_date: str | None = None, symbol: str | None = None) -> dict:
         ...
 
 
@@ -144,13 +149,13 @@ class TushareProvider:
     def fetch_announcements(self, symbol: str, start_date: date, end_date: date) -> list[dict]:
         rows: list[dict] = []
         df = _safe_df(
-            lambda: self.pro.anns(
+            lambda: self.pro.anns_d(
                 ts_code=symbol,
                 start_date=start_date.strftime("%Y%m%d"),
                 end_date=end_date.strftime("%Y%m%d"),
-                fields="ts_code,ann_date,title,type,url",
+                fields="ts_code,ann_date,name,title,url",
             ),
-            "anns",
+            "anns_d",
             [],
         )
         if df is None or df.empty:
@@ -160,9 +165,9 @@ class TushareProvider:
                 {
                     "date": _fmt_trade_date(str(row.get("ann_date", ""))),
                     "title": row.get("title"),
-                    "type": row.get("type"),
+                    "type": "公告",
                     "url": row.get("url"),
-                    "source": "tushare.anns",
+                    "source": "tushare.anns_d",
                 }
             )
         return rows
@@ -196,7 +201,7 @@ class TushareProvider:
             "gaps": gaps,
         }
 
-    def fetch_market_context(self, trade_date: str | None = None) -> dict:
+    def fetch_market_context(self, trade_date: str | None = None, symbol: str | None = None) -> dict:
         gaps: list[str] = []
         indices = []
         end = _compact_date(trade_date) if trade_date else date.today().strftime("%Y%m%d")
@@ -224,21 +229,101 @@ class TushareProvider:
                     }
                 )
         sentiment = self._fetch_market_sentiment(trade_date, gaps)
+        industry = self._fetch_industry_context(symbol, end, gaps)
         return {
-            "source": "tushare.index_daily/tushare.limit_list_d",
+            "source": "tushare.index_daily/tushare.sw_daily/tushare.limit_list_d",
             "indices": indices,
-            "industry": {
-                "status": "not_configured",
-                "note": "行业指数需配置 symbol 到行业指数代码的映射后精确拉取。",
-            },
+            "industry": industry,
             "sentiment": sentiment,
             "gaps": gaps,
         }
+
+    def _fetch_industry_context(self, symbol: str | None, trade_date: str, gaps: list[str]) -> dict:
+        mapping = self._resolve_industry_index(symbol, gaps)
+        if not mapping:
+            return {
+                "status": "not_configured",
+                "note": "Tushare 行业分类接口未返回行业映射，且本地配置未命中。",
+            }
+        cache_key = f"industry_{mapping['ts_code']}_{trade_date}"
+        cached = _read_cache(cache_key)
+        if cached:
+            return cached
+        df = _safe_df(
+            lambda: self.pro.sw_daily(
+                ts_code=mapping["ts_code"],
+                trade_date=trade_date,
+                fields="ts_code,name,trade_date,close,pct_change",
+            ),
+            f"sw_daily:{mapping['ts_code']}",
+            gaps,
+        )
+        if df is None or df.empty:
+            return {
+                "status": "failed",
+                "ts_code": mapping["ts_code"],
+                "name": mapping.get("name"),
+                "note": "行业指数接口未返回数据，已记录到数据缺口。",
+            }
+        row = df.sort_values("trade_date").iloc[-1].to_dict()
+        result = {
+            "status": "ok",
+            "ts_code": row.get("ts_code") or mapping["ts_code"],
+            "name": row.get("name") or mapping.get("name"),
+            "trade_date": _fmt_trade_date(str(row.get("trade_date", ""))),
+            "close": _num(row.get("close")),
+            "pct_chg": _num(row.get("pct_change")),
+            "source": "tushare.sw_daily",
+            "mapping_source": mapping.get("source"),
+        }
+        _write_cache(cache_key, result)
+        return result
+
+    def _resolve_industry_index(self, symbol: str | None, gaps: list[str]) -> dict[str, Any] | None:
+        if not symbol:
+            return None
+        cache_key = f"industry_mapping_{symbol}"
+        cached = _read_cache(cache_key)
+        if cached:
+            return cached
+        df = _safe_df(
+            lambda: self.pro.index_member_all(
+                ts_code=symbol,
+                fields="l1_code,l1_name,l2_code,l2_name,l3_code,l3_name,ts_code,name,is_new",
+            ),
+            "index_member_all",
+            gaps,
+        )
+        if df is None or df.empty:
+            return _load_industry_index_map(symbol)
+        current = df[df["is_new"] == "Y"] if "is_new" in df.columns else df
+        if current.empty:
+            current = df
+        row = current.iloc[0].to_dict()
+        if not row.get("l1_code"):
+            return _load_industry_index_map(symbol)
+        result = {
+            "ts_code": row.get("l1_code"),
+            "name": row.get("l1_name"),
+            "source": "tushare.index_member_all",
+            "stock": row.get("name"),
+            "stock_code": row.get("ts_code") or symbol,
+            "level2_code": row.get("l2_code"),
+            "level2_name": row.get("l2_name"),
+            "level3_code": row.get("l3_code"),
+            "level3_name": row.get("l3_name"),
+        }
+        _write_cache(cache_key, result)
+        return result
 
     def _fetch_market_sentiment(self, trade_date: str | None, gaps: list[str]) -> dict:
         if not trade_date:
             return {}
         compact = _compact_date(trade_date)
+        cache_key = f"market_sentiment_{compact}"
+        cached = _read_cache(cache_key)
+        if cached:
+            return cached
         df = _safe_df(
             lambda: self.pro.limit_list_d(
                 trade_date=compact,
@@ -252,12 +337,15 @@ class TushareProvider:
         limit_values = [str(v) for v in df.get("limit", [])]
         up = sum(1 for v in limit_values if "U" in v.upper() or "涨" in v)
         down = sum(1 for v in limit_values if "D" in v.upper() or "跌" in v)
-        return {
+        result = {
             "trade_date": trade_date,
             "limit_up_count": up,
             "limit_down_count": down,
             "sample_size": int(len(df)),
+            "source": "tushare.limit_list_d",
         }
+        _write_cache(cache_key, result)
+        return result
 
 
 class StaticProvider:
@@ -283,7 +371,7 @@ class StaticProvider:
     def fetch_moneyflow(self, symbol: str, start_date: date, end_date: date) -> dict:
         return dict(self.basic.get("moneyflow") or {"source": "static", "latest": {}, "gaps": []})
 
-    def fetch_market_context(self, trade_date: str | None = None) -> dict:
+    def fetch_market_context(self, trade_date: str | None = None, symbol: str | None = None) -> dict:
         return dict(
             self.basic.get("market_context")
             or {
@@ -323,5 +411,53 @@ def _safe_df(call: Callable[[], Any], label: str, gaps: list[str]):
     try:
         return call()
     except Exception as exc:  # noqa: BLE001 - 外部数据源失败必须降级为审计缺口
-        gaps.append(f"{label}_failed:{exc.__class__.__name__}")
+        gaps.append(_gap_code(label, exc))
         return None
+
+
+def _gap_code(label: str, exc: Exception) -> str:
+    message = str(exc)
+    if "频率超限" in message:
+        return f"{label}_rate_limited"
+    if "权限" in message or "没有权限" in message:
+        return f"{label}_permission_denied"
+    if "接口名" in message:
+        return f"{label}_invalid_interface"
+    return f"{label}_failed:{exc.__class__.__name__}"
+
+
+def _load_industry_index_map(symbol: str | None) -> dict[str, Any] | None:
+    if not symbol or not INDUSTRY_INDEX_MAP_PATH.exists():
+        return None
+    try:
+        data = json.loads(INDUSTRY_INDEX_MAP_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    value = (data.get("symbol_to_index") or {}).get(symbol)
+    if isinstance(value, str):
+        return {"ts_code": value, "source": "config"}
+    if isinstance(value, dict) and value.get("ts_code"):
+        return value
+    return None
+
+
+def _cache_path(key: str) -> Path:
+    safe = "".join(char if char.isalnum() or char in "._-" else "_" for char in key)
+    return CACHE_DIR / f"{safe}.json"
+
+
+def _read_cache(key: str) -> dict[str, Any] | None:
+    path = _cache_path(key)
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _write_cache(key: str, data: dict[str, Any]) -> None:
+    path = _cache_path(key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

@@ -15,6 +15,16 @@ RISK_FLAG_DESCRIPTIONS = {
     "ANNOUNCEMENT_EVENT_RISK": "近期公告存在中高风险事件，需复核公告原文",
 }
 
+DATA_GAP_DESCRIPTIONS = {
+    "announcements_empty_or_unavailable": "公告接口未返回可用公告；可能是接口权限、数据覆盖或查询区间问题",
+    "financials_empty_or_unavailable": "财报接口未返回可用财务数据",
+    "moneyflow_empty_or_unavailable": "资金流接口未返回可用数据",
+    "market_indices_empty_or_unavailable": "宽基指数接口未返回可用数据",
+    "industry_index_mapping_not_configured": "尚未配置该股票对应的行业指数映射",
+    "industry_index_unavailable": "已自动识别行业指数，但本次行业指数行情接口未返回可用数据",
+    "limit_list_d_rate_limited": "Tushare 涨跌停情绪接口触发频率限制；后续同一交易日成功后会优先使用本地缓存",
+}
+
 
 def render_report(pack: dict[str, Any], scorecard: dict[str, Any], position: dict[str, Any] | None = None) -> str:
     symbol = pack["meta"]["symbol"]
@@ -336,8 +346,15 @@ def _market_context_lines(pack: dict[str, Any]) -> str:
     else:
         lines.append("- **指数环境**：指数数据缺失，已记录到数据缺口。")
     industry = context.get("industry") or {}
-    if industry.get("status") == "not_configured":
+    if industry.get("status") == "ok":
+        lines.append(
+            f"- **行业指数**：{industry.get('name')}（{industry.get('ts_code')}）{industry.get('trade_date')} 收盘 {industry.get('close')}，涨跌幅 {industry.get('pct_chg')}%"
+        )
+    elif industry.get("status") == "not_configured":
         lines.append(f"- **行业指数**：{industry.get('note') or '未配置行业指数映射。'}")
+    elif industry.get("status") == "failed":
+        label = f"{industry.get('name')}（{industry.get('ts_code')}）" if industry.get("ts_code") else "行业指数"
+        lines.append(f"- **行业指数**：{label} 已识别；{industry.get('note') or '行业指数行情接口未返回数据。'}")
     sentiment = context.get("sentiment") or {}
     if sentiment:
         lines.append(
@@ -381,7 +398,22 @@ def _gap_lines(pack: dict[str, Any]) -> str:
     gaps = pack.get("data_gaps") or []
     if not gaps:
         return "- **数据缺口**：暂无。"
-    return "\n".join(f"- **{gap}**：需复核或补充数据源权限。" for gap in gaps)
+    return "\n".join(f"- **{_gap_description(gap)}**：需复核或补充数据源权限。" for gap in gaps)
+
+
+def _gap_description(gap: str) -> str:
+    if gap in DATA_GAP_DESCRIPTIONS:
+        return DATA_GAP_DESCRIPTIONS[gap]
+    if gap.startswith("sw_daily:") and gap.endswith("_rate_limited"):
+        code = gap.removeprefix("sw_daily:").removesuffix("_rate_limited")
+        return f"Tushare 申万行业指数接口 {code} 触发频率限制；后续同一交易日成功后会优先使用本地缓存"
+    if gap.endswith("_permission_denied"):
+        return f"{gap.removesuffix('_permission_denied')} 接口权限不足"
+    if gap.endswith("_invalid_interface"):
+        return f"{gap.removesuffix('_invalid_interface')} 接口名称不兼容或不可用"
+    if gap.endswith("_rate_limited"):
+        return f"{gap.removesuffix('_rate_limited')} 接口触发频率限制"
+    return gap
 
 
 def _position_lines(quote: dict[str, Any], position: dict[str, Any] | None) -> str:

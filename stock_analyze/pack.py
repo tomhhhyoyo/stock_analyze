@@ -23,7 +23,7 @@ def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDat
     financials = provider.fetch_financials(symbol, request.period.start_date, request.period.end_date)
     announcements = enrich_announcements(provider.fetch_announcements(symbol, request.period.start_date, request.period.end_date))
     moneyflow = provider.fetch_moneyflow(symbol, request.period.start_date, request.period.end_date)
-    market_context = provider.fetch_market_context(last.date)
+    market_context = provider.fetch_market_context(last.date, symbol)
     data_gaps = _collect_data_gaps(financials, moneyflow, market_context, announcements)
     indicators = {
         "ma5": moving_average(closes, 5),
@@ -175,6 +175,8 @@ def _collect_data_gaps(
     industry = market_context.get("industry") or {}
     if industry.get("status") == "not_configured":
         gaps.append("industry_index_mapping_not_configured")
+    if industry.get("status") == "failed":
+        gaps.append("industry_index_unavailable")
     return sorted(set(gaps))
 
 

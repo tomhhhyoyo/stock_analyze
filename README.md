@@ -38,13 +38,15 @@ export TUSHARE_TOKEN=your_token
 - 日线行情：`daily`
 - 估值：`daily_basic`
 - 财报：`fina_indicator`、`income`
-- 公告：`anns`
+- 公告：`anns_d`
 - 资金流：`moneyflow`
 - 指数环境：`index_daily`
+- 行业分类：`index_member_all`
+- 行业指数：`sw_daily`
 - 市场情绪：`limit_list_d`
 - 股票名称映射：`stock_basic`
 
-行业指数已保留输出字段，但需要后续配置“股票到行业指数代码”的映射后才能精确拉取。
+行业指数会优先通过 Tushare `index_member_all` 自动识别股票所属申万一级行业，再用 `sw_daily` 拉取对应行业指数；`config/industry_index_map.json` 仅用于人工覆盖或兜底。`limit_list_d`、`index_member_all` 和 `sw_daily` 这类频率受限接口会写入 `data_cache/`，同一交易日重复分析时优先使用缓存，避免反复触发 Tushare 限频。
 
 ## 数据契约
 
