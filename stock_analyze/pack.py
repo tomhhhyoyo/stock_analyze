@@ -7,6 +7,7 @@ from .data_provider import MarketDataProvider
 from .announcements import enrich_announcements
 from .indicators import atr, bollinger, macd, max_drawdown, moving_average, pct_change, rsi, volatility
 from .models import AnalysisRequest
+from .symbols import lookup_name_by_symbol
 
 
 def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDataProvider) -> dict[str, Any]:
@@ -65,6 +66,7 @@ def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDat
         "meta": {
             "contract_version": "1.1.0",
             "symbol": symbol,
+            "name": lookup_name_by_symbol(symbol),
             "market": "A-share",
             "currency": "CNY",
             "as_of": datetime.now().astimezone().isoformat(timespec="seconds"),

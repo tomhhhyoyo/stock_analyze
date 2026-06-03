@@ -155,6 +155,18 @@ def lookup_symbol_by_name(name: str, cache: dict[str, list[str]] | None = None) 
     return unique[0] if unique else None
 
 
+def lookup_name_by_symbol(symbol: str, cache: dict[str, list[str]] | None = None) -> str | None:
+    normalized = normalize_symbol(symbol)
+    merged: dict[str, list[str]] = {k: [v] for k, v in DEFAULT_NAME_TO_SYMBOL.items()}
+    for key, values in (cache or load_symbol_cache()).items():
+        merged.setdefault(key, [])
+        for value in values:
+            if value not in merged[key]:
+                merged[key].append(value)
+    matches = [name for name, values in merged.items() if normalized in values]
+    return matches[0] if matches else None
+
+
 def extract_symbols(text: str, cache_path: str | Path | None = None) -> list[str]:
     found: list[str] = []
     for match in re.findall(r"\b\d{6}(?:\.(?:SH|SZ|BJ|sh|sz|bj))?\b", text):

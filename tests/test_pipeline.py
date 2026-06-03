@@ -73,6 +73,7 @@ def test_run_single_stock_analysis(tmp_path: Path):
     assert (tmp_path / "600519.SH" / "report.md").exists()
     assert (tmp_path / "600519.SH" / "audit.md").exists()
     pack = json.loads((tmp_path / "600519.SH" / "market_pack.json").read_text(encoding="utf-8"))
+    assert pack["meta"]["name"] == "贵州茅台"
     assert pack["fundamental"]["revenue_growth_yoy"] == 6.2
     assert pack["moneyflow"]["latest"]["net_amount_5d"] == 50
     assert pack["market_context"]["indices"][0]["name"] == "上证指数"
@@ -86,12 +87,15 @@ def test_run_single_stock_analysis(tmp_path: Path):
     raw = json.loads((tmp_path / "600519.SH" / "raw_data.json").read_text(encoding="utf-8"))
     assert raw["provider"] == "static"
     assert raw["generated_at"]
+    assert raw["meta"]["name"] == "贵州茅台"
     assert "basic" in raw
     assert "financials" in raw
     assert "announcements" in raw
     assert "moneyflow" in raw
     assert "market_context" in raw
     report = (tmp_path / "600519.SH" / "report.md").read_text(encoding="utf-8")
+    assert "# 贵州茅台（600519.SH）中文多维研究报告" in report
+    assert "**股票**：贵州茅台（600519.SH）" in report
     assert "资金流分析" in report
     assert "公告与事件风险" in report
 
@@ -121,7 +125,9 @@ def test_report_uses_chinese_risk_descriptions(tmp_path: Path):
     report = (tmp_path / "601728.SH" / "report.md").read_text(encoding="utf-8")
     assert "归母净利润同比为负，盈利增长承压" in report
     assert "营收同比为负，收入增长承压" in report
-    assert "风险码：`NET_PROFIT_GROWTH_NEGATIVE`" in report
+    assert "NET_PROFIT_GROWTH_NEGATIVE" not in report
+    audit = (tmp_path / "601728.SH" / "audit.md").read_text(encoding="utf-8")
+    assert "内部标记：`NET_PROFIT_GROWTH_NEGATIVE`" in audit
     assert "- **NET_PROFIT_GROWTH_NEGATIVE**：需复核。" not in report
 
 
@@ -141,6 +147,8 @@ def test_run_watchlist_analysis(tmp_path: Path):
 
     text = (tmp_path / "watchlist_report.md").read_text(encoding="utf-8")
     assert "| 股票 | 评级 | 总分 | 趋势 | 量价 | 基本面 | 估值 | 资金流 | 市场环境 | 风险 | 数据质量 |" in text
+    assert "贵州茅台（600519.SH）" in text
+    assert "宁德时代（300750.SZ）" in text
     assert "不构成买入推荐" in text
 
 

@@ -18,16 +18,17 @@ RISK_FLAG_DESCRIPTIONS = {
 
 def render_report(pack: dict[str, Any], scorecard: dict[str, Any], position: dict[str, Any] | None = None) -> str:
     symbol = pack["meta"]["symbol"]
+    display_name = _stock_display_name(pack)
     trade_date = pack["meta"]["trade_date"]
     quote = pack["quote"]
     ind = pack["indicators"]
     scores = scorecard["scores"]
     position_lines = _position_lines(quote, position)
-    return f"""# {symbol} 中文多维研究报告
+    return f"""# {display_name}中文多维研究报告
 
 ## 核心结论
 
-- **股票**：{symbol}
+- **股票**：{display_name}
 - **数据日期**：{trade_date}
 - **综合评级**：{scorecard["rating"]}
 - **综合分数**：{scores["total"]}/100
@@ -101,7 +102,7 @@ def render_report(pack: dict[str, Any], scorecard: dict[str, Any], position: dic
 
 ## 主要风险
 
-{_risk_lines(pack)}
+{_risk_lines(pack, include_code=False)}
 
 ## 观察条件
 
@@ -130,7 +131,7 @@ def render_audit(pack: dict[str, Any], scorecard: dict[str, Any]) -> str:
 
 ## 数据状态
 
-- **股票**：{pack["meta"]["symbol"]}
+- **股票**：{_stock_display_name(pack)}
 - **交易日**：{pack["meta"]["trade_date"]}
 - **数据源**：{pack["meta"]["source"]}
 - **日线数量**：{len(pack.get("daily_bars", []))}
@@ -154,7 +155,7 @@ def render_audit(pack: dict[str, Any], scorecard: dict[str, Any]) -> str:
 
 ## 风险标记
 
-{_risk_lines(pack)}
+{_risk_lines(pack, include_code=True)}
 """
 
 
@@ -163,7 +164,7 @@ def render_dossier(pack: dict[str, Any], scorecard: dict[str, Any]) -> str:
 
 ## 输入
 
-- **股票**：{pack["meta"]["symbol"]}
+- **股票**：{_stock_display_name(pack)}
 - **交易日**：{pack["meta"]["trade_date"]}
 - **请求模式**：{pack["request"]["mode"]}
 
@@ -209,7 +210,7 @@ def render_watchlist_report(results: list[dict[str, Any]]) -> str:
             "| "
             + " | ".join(
                 [
-                    str(sc["symbol"]),
+                    _stock_display_name(item.get("pack") or {"meta": {"symbol": sc["symbol"]}}),
                     str(sc["rating"]),
                     _score_cell(scores.get("total")),
                     _score_cell(scores.get("trend")),
@@ -230,7 +231,7 @@ def render_watchlist_report(results: list[dict[str, Any]]) -> str:
         ev = sc.get("evidence") or {}
         flags = sc.get("risk_flags") or []
         lines.append(
-            f"- **第 {idx} 档 {sc['symbol']}**：评级 {sc['rating']}，总分 {sc['scores']['total']}/100，交易日 {sc['trade_date']}，"
+            f"- **第 {idx} 档 {_stock_display_name(item.get('pack') or {'meta': {'symbol': sc['symbol']}})}**：评级 {sc['rating']}，总分 {sc['scores']['total']}/100，交易日 {sc['trade_date']}，"
             f"20日涨跌幅 {ev.get('ret_20d_pct')}%，5日资金净流入 {ev.get('moneyflow_net_amount_5d')}，风险标记 {len(flags)} 个。"
         )
     lines.extend(["", "## 风险提示", "", "- 观察池报告只做横向研究排序，不构成买入推荐。", "- 如需单票详细证据，请查看各股票目录下的 `report.md` 和 `market_pack.json`。"])
@@ -250,6 +251,13 @@ def _data_quality_text(audit: dict[str, Any]) -> str:
     if gaps <= 2:
         return f"少量缺口({gaps})"
     return f"缺口较多({gaps})"
+
+
+def _stock_display_name(pack: dict[str, Any]) -> str:
+    meta = pack.get("meta") or {}
+    symbol = meta.get("symbol") or ""
+    name = meta.get("name")
+    return f"{name}（{symbol}）" if name else str(symbol)
 
 
 def _summary(pack: dict[str, Any], scorecard: dict[str, Any]) -> str:
@@ -351,11 +359,18 @@ def _announcement_lines(pack: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _risk_lines(pack: dict[str, Any]) -> str:
+def _risk_lines(pack: dict[str, Any], include_code: bool = False) -> str:
     flags = pack.get("risk_flags") or []
     if not flags:
         return "- **风险标记**：暂无自动风险标记。"
-    return "\n".join(f"- **{_risk_description(flag)}**（风险码：`{flag}`）：需复核。" for flag in flags)
+    lines = []
+    for flag in flags:
+        description = _risk_description(flag)
+        if include_code:
+            lines.append(f"- **{description}**（内部标记：`{flag}`）：需复核。")
+        else:
+            lines.append(f"- **{description}**：需复核。")
+    return "\n".join(lines)
 
 
 def _risk_description(flag: str) -> str:

@@ -43,6 +43,7 @@ def _build_raw_data(pack: dict[str, Any]) -> dict[str, Any]:
         "generated_at": pack["meta"].get("as_of"),
         "meta": {
             "symbol": pack["meta"]["symbol"],
+            "name": pack["meta"].get("name"),
             "trade_date": pack["meta"]["trade_date"],
             "as_of": pack["meta"]["as_of"],
             "note": "raw_data.json 保存规范化后的原始数据响应快照，用于审计；不包含 token 或密钥。",
