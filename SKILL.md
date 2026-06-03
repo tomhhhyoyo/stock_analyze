@@ -1,6 +1,6 @@
 ---
 name: a-share-research-zh
-description: 使用中文命令和自然语言输入，对用户指定的 A 股股票进行多维研究分析。数据源为 Tushare Pro 或 Akshare fallback，输出中文报告。
+description: 使用中文命令和自然语言输入，对用户指定的 A 股股票进行多维研究分析。数据源必须为 Tushare Pro，输出中文报告。
 ---
 
 # A 股多维研究 Skill
@@ -50,7 +50,7 @@ description: 使用中文命令和自然语言输入，对用户指定的 A 股�
 ```text
 解析用户命令
 → 生成 request.json
-→ 拉取结构化数据
+→ 使用 TUSHARE_TOKEN 拉取 Tushare 结构化数据
 → 生成 raw_data.json
 → 生成 market_pack.json
 → 校验 data_audit 和 data_gaps
@@ -164,7 +164,7 @@ output/{symbol}/report.md
 - 禁止使用模型记忆补全数值。
 - 禁止把网页搜索结果作为价格、均线、成交量、估值的唯一计算来源。
 - 禁止把 `TUSHARE_TOKEN` 写入代码、测试、日志或报告。
-- 禁止在测试中访问真实 Tushare / Akshare。
+- 禁止在测试中访问真实 Tushare。
 - 禁止新增超过三个主命令的用户入口。
 
 ## 最终检查清单
@@ -177,4 +177,3 @@ output/{symbol}/report.md
 - 是否列出 `data_gaps`。
 - 是否避免直接买卖建议和目标价。
 - 是否报告全中文。
-

@@ -17,8 +17,8 @@
 ## 数据源说明
 
 - `TUSHARE_TOKEN` 只能从环境变量读取。
-- 设置 `TUSHARE_TOKEN` 时优先使用 Tushare Pro。
-- 未设置 token 时使用 Akshare 日线 fallback。
+- 生产分析必须使用 Tushare Pro。
+- 未设置 `TUSHARE_TOKEN` 时必须直接失败，不允许使用其他行情源回退。
 - 外部接口失败必须写入 `data_gaps`，不得编造数据。
 - 测试必须使用 `StaticProvider` 或 fake provider，不访问真实网络服务。
 
@@ -93,4 +93,3 @@ python -m pytest
 - 确认 `.venv/`、`.pytest_cache/`、`output/` 被忽略。
 - 确认报告中文、无目标价、无直接买卖建议。
 - 确认所有数值来自 `market_pack.json`。
-

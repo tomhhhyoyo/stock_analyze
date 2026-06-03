@@ -23,17 +23,17 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 ```
 
-如需 Tushare：
+必须设置 Tushare Token：
 
 ```bash
 export TUSHARE_TOKEN=your_token
 ```
 
-未设置 `TUSHARE_TOKEN` 时，会尝试使用 Akshare 日线数据；财报、公告、资金流、指数和情绪字段会写入数据缺口。
+未设置 `TUSHARE_TOKEN` 时，程序会直接失败并提示设置环境变量；不会使用其他行情源回退。
 
 ## 数据范围
 
-当前 Tushare 接入：
+当前数据全部通过 Tushare 获取：
 
 - 日线行情：`daily`
 - 估值：`daily_basic`

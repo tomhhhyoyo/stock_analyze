@@ -247,57 +247,6 @@ class TushareProvider:
         }
 
 
-class AkshareProvider:
-    def fetch_daily_bars(self, symbol: str, start_date: date, end_date: date) -> list[DailyBar]:
-        import akshare as ak
-
-        code = symbol.split(".")[0]
-        df = ak.stock_zh_a_hist(
-            symbol=code,
-            period="daily",
-            start_date=start_date.strftime("%Y%m%d"),
-            end_date=end_date.strftime("%Y%m%d"),
-            adjust="qfq",
-        )
-        if df is None or df.empty:
-            raise RuntimeError(f"Akshare 未返回日线数据：{symbol}")
-        bars: list[DailyBar] = []
-        for row in df.sort_values("日期").to_dict("records"):
-            bars.append(
-                DailyBar(
-                    date=str(row["日期"]),
-                    open=float(row["开盘"]),
-                    high=float(row["最高"]),
-                    low=float(row["最低"]),
-                    close=float(row["收盘"]),
-                    volume=float(row["成交量"]),
-                    amount=float(row.get("成交额") or 0),
-                )
-            )
-        return bars
-
-    def fetch_basic(self, symbol: str, trade_date: str | None = None) -> dict:
-        return {"source": "akshare", "note": "Akshare fallback 未拉取估值字段"}
-
-    def fetch_financials(self, symbol: str, start_date: date, end_date: date) -> dict:
-        return {"source": "akshare", "latest": {}, "gaps": ["akshare_financials_not_configured"]}
-
-    def fetch_announcements(self, symbol: str, start_date: date, end_date: date) -> list[dict]:
-        return []
-
-    def fetch_moneyflow(self, symbol: str, start_date: date, end_date: date) -> dict:
-        return {"source": "akshare", "latest": {}, "gaps": ["akshare_moneyflow_not_configured"]}
-
-    def fetch_market_context(self, trade_date: str | None = None) -> dict:
-        return {
-            "source": "akshare",
-            "indices": [],
-            "industry": {"status": "not_configured"},
-            "sentiment": {},
-            "gaps": ["akshare_market_context_not_configured"],
-        }
-
-
 class StaticProvider:
     def __init__(self, bars: list[DailyBar], basic: dict | None = None) -> None:
         self.bars = bars
@@ -332,9 +281,7 @@ class StaticProvider:
 
 
 def default_provider() -> MarketDataProvider:
-    if os.environ.get("TUSHARE_TOKEN"):
-        return TushareProvider()
-    return AkshareProvider()
+    return TushareProvider()
 
 
 def _fmt_trade_date(value: str) -> str:

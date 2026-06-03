@@ -1,7 +1,9 @@
 import json
 from pathlib import Path
 
-from stock_analyze.data_provider import StaticProvider
+import pytest
+
+from stock_analyze.data_provider import StaticProvider, default_provider
 from stock_analyze.models import DailyBar
 from stock_analyze.pipeline import run_analysis
 
@@ -103,3 +105,10 @@ def test_run_watchlist_analysis(tmp_path: Path):
     text = (tmp_path / "watchlist_report.md").read_text(encoding="utf-8")
     assert "分项评分" in text
     assert "不构成买入推荐" in text
+
+
+def test_default_provider_requires_tushare_token(monkeypatch):
+    monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
+
+    with pytest.raises(RuntimeError, match="TUSHARE_TOKEN 未设置"):
+        default_provider()
