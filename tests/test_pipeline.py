@@ -65,14 +65,16 @@ def test_run_single_stock_analysis(tmp_path: Path):
     )
 
     result = run_analysis("/股票 分析 600519.SH，最近两年", tmp_path, provider)
+    output_dir = tmp_path / "贵州茅台（600519.SH）"
 
     assert result["results"][0]["scorecard"]["rating"] in {"watch", "neutral", "avoid"}
-    assert (tmp_path / "600519.SH" / "market_pack.json").exists()
-    assert (tmp_path / "600519.SH" / "raw_data.json").exists()
-    assert (tmp_path / "600519.SH" / "scorecard.json").exists()
-    assert (tmp_path / "600519.SH" / "report.md").exists()
-    assert (tmp_path / "600519.SH" / "audit.md").exists()
-    pack = json.loads((tmp_path / "600519.SH" / "market_pack.json").read_text(encoding="utf-8"))
+    assert result["results"][0]["report_path"].endswith("贵州茅台（600519.SH）/report.md")
+    assert (output_dir / "market_pack.json").exists()
+    assert (output_dir / "raw_data.json").exists()
+    assert (output_dir / "scorecard.json").exists()
+    assert (output_dir / "report.md").exists()
+    assert (output_dir / "audit.md").exists()
+    pack = json.loads((output_dir / "market_pack.json").read_text(encoding="utf-8"))
     assert pack["meta"]["name"] == "贵州茅台"
     assert pack["fundamental"]["revenue_growth_yoy"] == 6.2
     assert pack["moneyflow"]["latest"]["net_amount_5d"] == 50
@@ -84,7 +86,7 @@ def test_run_single_stock_analysis(tmp_path: Path):
     assert pack["indicators"]["atr14"] is not None
     assert pack["indicators"]["max_drawdown60"] is not None
     assert pack["indicators"]["volatility20"] is not None
-    raw = json.loads((tmp_path / "600519.SH" / "raw_data.json").read_text(encoding="utf-8"))
+    raw = json.loads((output_dir / "raw_data.json").read_text(encoding="utf-8"))
     assert raw["provider"] == "static"
     assert raw["generated_at"]
     assert raw["meta"]["name"] == "贵州茅台"
@@ -93,7 +95,7 @@ def test_run_single_stock_analysis(tmp_path: Path):
     assert "announcements" in raw
     assert "moneyflow" in raw
     assert "market_context" in raw
-    report = (tmp_path / "600519.SH" / "report.md").read_text(encoding="utf-8")
+    report = (output_dir / "report.md").read_text(encoding="utf-8")
     assert "# 贵州茅台（600519.SH）中文多维研究报告" in report
     assert "**股票**：贵州茅台（600519.SH）" in report
     assert "资金流分析" in report
@@ -121,12 +123,13 @@ def test_report_uses_chinese_risk_descriptions(tmp_path: Path):
     )
 
     run_analysis("/股票 分析 601728.SH，最近两年", tmp_path, provider)
+    output_dir = tmp_path / "中国电信（601728.SH）"
 
-    report = (tmp_path / "601728.SH" / "report.md").read_text(encoding="utf-8")
+    report = (output_dir / "report.md").read_text(encoding="utf-8")
     assert "归母净利润同比为负，盈利增长承压" in report
     assert "营收同比为负，收入增长承压" in report
     assert "NET_PROFIT_GROWTH_NEGATIVE" not in report
-    audit = (tmp_path / "601728.SH" / "audit.md").read_text(encoding="utf-8")
+    audit = (output_dir / "audit.md").read_text(encoding="utf-8")
     assert "内部标记：`NET_PROFIT_GROWTH_NEGATIVE`" in audit
     assert "- **NET_PROFIT_GROWTH_NEGATIVE**：需复核。" not in report
 
@@ -136,7 +139,7 @@ def test_run_position_analysis(tmp_path: Path):
 
     run_analysis("/持仓 600519.SH，成本 10.50，持仓 100 股", tmp_path, provider)
 
-    text = (tmp_path / "600519.SH" / "position_report.md").read_text(encoding="utf-8")
+    text = (tmp_path / "贵州茅台（600519.SH）" / "position_report.md").read_text(encoding="utf-8")
     assert "相对成本" in text
 
 

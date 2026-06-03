@@ -21,7 +21,7 @@ def run_analysis(text: str, out_dir: Path = Path("output"), provider: MarketData
     for symbol in request.symbols:
         pack = build_market_pack(request, symbol, provider)
         scorecard = build_scorecard(pack)
-        symbol_dir = out_dir / symbol
+        symbol_dir = out_dir / _output_dir_name(pack)
         write_json(symbol_dir / "request.json", request.to_dict())
         write_json(symbol_dir / "raw_data.json", _build_raw_data(pack))
         write_json(symbol_dir / "market_pack.json", pack)
@@ -35,6 +35,18 @@ def run_analysis(text: str, out_dir: Path = Path("output"), provider: MarketData
     if request.mode == "watchlist_review" or len(results) > 1:
         write_text(out_dir / "watchlist_report.md", render_watchlist_report(results))
     return {"request": request.to_dict(), "results": results}
+
+
+def _output_dir_name(pack: dict[str, Any]) -> str:
+    symbol = str(pack["meta"]["symbol"])
+    name = pack["meta"].get("name")
+    if not name:
+        return symbol
+    return f"{_sanitize_path_part(str(name))}（{symbol}）"
+
+
+def _sanitize_path_part(value: str) -> str:
+    return "".join("_" if char in '/\\:*?"<>|' else char for char in value).strip() or "unknown"
 
 
 def _build_raw_data(pack: dict[str, Any]) -> dict[str, Any]:

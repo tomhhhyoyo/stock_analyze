@@ -86,14 +86,16 @@ export TUSHARE_TOKEN=your_token
 单股输出：
 
 ```text
-output/{symbol}/request.json
-output/{symbol}/raw_data.json
-output/{symbol}/market_pack.json
-output/{symbol}/scorecard.json
-output/{symbol}/audit.md
-output/{symbol}/decision_dossier.md
-output/{symbol}/report.md
+output/{中文名（symbol）}/request.json
+output/{中文名（symbol）}/raw_data.json
+output/{中文名（symbol）}/market_pack.json
+output/{中文名（symbol）}/scorecard.json
+output/{中文名（symbol）}/audit.md
+output/{中文名（symbol）}/decision_dossier.md
+output/{中文名（symbol）}/report.md
 ```
+
+如果中文名缺失，输出目录会回退为 `output/{symbol}`。
 
 `market_pack.json` 包含：
 

@@ -9,7 +9,7 @@ description: 使用中文命令和自然语言输入，对用户指定的 A 股�
 
 本 Skill 是中文 A 股多维研究工具。普通用户只通过“命令 + 自然语言”表达需求；CLI 脚本只是内部执行工具，不是普通用户主要入口。
 
-本 Skill 不编造行情数据，不输出目标价，不输出直接买入、卖出、满仓、清仓等交易指令。所有数值结论必须来自 `output/{symbol}/market_pack.json`。
+本 Skill 不编造行情数据，不输出目标价，不输出直接买入、卖出、满仓、清仓等交易指令。所有数值结论必须来自 `output/{中文名（symbol）}/market_pack.json`；中文名缺失时才回退为 `output/{symbol}/market_pack.json`。
 
 ## 三个命令
 
@@ -100,26 +100,26 @@ description: 使用中文命令和自然语言输入，对用户指定的 A 股�
 单只股票：
 
 ```text
-output/{symbol}/request.json
-output/{symbol}/raw_data.json
-output/{symbol}/market_pack.json
-output/{symbol}/scorecard.json
-output/{symbol}/audit.md
-output/{symbol}/decision_dossier.md
-output/{symbol}/report.md
+output/{中文名（symbol）}/request.json
+output/{中文名（symbol）}/raw_data.json
+output/{中文名（symbol）}/market_pack.json
+output/{中文名（symbol）}/scorecard.json
+output/{中文名（symbol）}/audit.md
+output/{中文名（symbol）}/decision_dossier.md
+output/{中文名（symbol）}/report.md
 ```
 
 持仓快检：
 
 ```text
-output/{symbol}/position_report.md
+output/{中文名（symbol）}/position_report.md
 ```
 
 观察池：
 
 ```text
 output/watchlist_report.md
-output/{symbol}/report.md
+output/{中文名（symbol）}/report.md
 ```
 
 ## 中文报告结构

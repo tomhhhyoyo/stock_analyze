@@ -25,7 +25,10 @@ def _summary(result: dict) -> str:
     lines = ["## 核心结论", ""]
     for item in result["results"]:
         sc = item["scorecard"]
-        lines.append(f"- **股票**：{sc['symbol']}")
+        meta = (item.get("pack") or {}).get("meta") or {}
+        name = meta.get("name")
+        display_name = f"{name}（{sc['symbol']}）" if name else sc["symbol"]
+        lines.append(f"- **股票**：{display_name}")
         lines.append(f"- **数据日期**：{sc['trade_date']}")
         lines.append(f"- **综合评级**：{sc['rating']}")
         lines.append(f"- **综合分数**：{sc['scores']['total']}/100")
@@ -36,4 +39,3 @@ def _summary(result: dict) -> str:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
