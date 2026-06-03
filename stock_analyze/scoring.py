@@ -1,9 +1,28 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
+
+DEFAULT_SCORING_CONFIG = {
+    "weights": {
+        "trend": 0.3,
+        "volume_price": 0.15,
+        "fundamental": 0.15,
+        "valuation": 0.15,
+        "moneyflow": 0.1,
+        "market_context": 0.05,
+        "risk": 0.1,
+    },
+    "rating_thresholds": {"watch": 72, "neutral": 50},
+    "risk_penalty_per_flag": 12,
+    "gap_penalty": {"critical": 6, "warning": 3, "info": 1},
+}
 
 
 def build_scorecard(pack: dict[str, Any]) -> dict[str, Any]:
+    config = load_scoring_config()
+    weights = config["weights"]
     quote = pack["quote"]
     ind = pack["indicators"]
     risk_flags = pack.get("risk_flags", [])
@@ -13,18 +32,24 @@ def build_scorecard(pack: dict[str, Any]) -> dict[str, Any]:
     valuation_score = _valuation_score(pack.get("fundamental") or {})
     moneyflow_score = _moneyflow_score(pack.get("moneyflow") or {})
     market_score = _market_score(pack.get("market_context") or {})
-    risk_score = max(0, 100 - len(risk_flags) * 12 - len(pack.get("data_gaps") or []) * 2)
+    risk_score = max(
+        0,
+        100
+        - len(risk_flags) * int(config.get("risk_penalty_per_flag", 12))
+        - _gap_penalty(pack.get("data_gaps") or [], config.get("gap_penalty") or {}),
+    )
     total = round(
-        trend_score * 0.3
-        + volume_score * 0.15
-        + fundamental_score * 0.15
-        + valuation_score * 0.15
-        + moneyflow_score * 0.1
-        + market_score * 0.05
-        + risk_score * 0.1,
+        trend_score * weights["trend"]
+        + volume_score * weights["volume_price"]
+        + fundamental_score * weights["fundamental"]
+        + valuation_score * weights["valuation"]
+        + moneyflow_score * weights["moneyflow"]
+        + market_score * weights["market_context"]
+        + risk_score * weights["risk"],
         1,
     )
-    rating = "watch" if total >= 72 else "neutral" if total >= 50 else "avoid"
+    thresholds = config.get("rating_thresholds") or {}
+    rating = "watch" if total >= thresholds.get("watch", 72) else "neutral" if total >= thresholds.get("neutral", 50) else "avoid"
     return {
         "symbol": pack["meta"]["symbol"],
         "trade_date": pack["meta"]["trade_date"],
@@ -40,6 +65,7 @@ def build_scorecard(pack: dict[str, Any]) -> dict[str, Any]:
         },
         "rating": rating,
         "rating_note": "评级仅表示研究观察优先级，不代表买入或卖出建议。",
+        "scoring_config": config,
         "risk_flags": risk_flags,
         "evidence": _evidence(pack),
     }
@@ -136,3 +162,36 @@ def _evidence(pack: dict[str, Any]) -> dict[str, Any]:
 
 def _clamp(value: float) -> int:
     return int(max(0, min(100, round(value))))
+
+
+def load_scoring_config(path: str | Path = "config/scoring_weights.json") -> dict[str, Any]:
+    config_path = Path(path)
+    if not config_path.exists():
+        return DEFAULT_SCORING_CONFIG
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    merged = json.loads(json.dumps(DEFAULT_SCORING_CONFIG))
+    for key, value in data.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key].update(value)
+        else:
+            merged[key] = value
+    _validate_weights(merged["weights"])
+    return merged
+
+
+def _validate_weights(weights: dict[str, float]) -> None:
+    total = round(sum(float(value) for value in weights.values()), 6)
+    if total != 1:
+        raise ValueError(f"评分权重合计必须为 1，当前为 {total}")
+
+
+def _gap_penalty(gaps: list[str], config: dict[str, int]) -> int:
+    penalty = 0
+    for gap in gaps:
+        if "financials" in gap or "moneyflow" in gap or "market_indices" in gap:
+            penalty += int(config.get("critical", 6))
+        elif "announcements" in gap or "limit_list" in gap:
+            penalty += int(config.get("warning", 3))
+        else:
+            penalty += int(config.get("info", 1))
+    return penalty

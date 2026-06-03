@@ -8,6 +8,14 @@
 
 项目会生成结构化数据包、评分、审计、证据链和中文报告。所有数值结论都必须来自 `market_pack.json`。
 
+普通用户入口保持只有三个：
+
+```text
+/{命令} {自然语言需求}
+```
+
+CLI 只是内部执行工具，不是普通用户需要记忆的主要入口。
+
 ## 安装
 
 ```bash
@@ -36,6 +44,27 @@ export TUSHARE_TOKEN=your_token
 - 市场情绪：`limit_list_d`
 
 行业指数已保留输出字段，但需要后续配置“股票到行业指数代码”的映射后才能精确拉取。
+
+## 数据契约
+
+`market_pack.json` 是唯一数值事实来源，包含：
+
+- `meta`
+- `request`
+- `data_contract`
+- `quote`
+- `daily_bars`
+- `indicators`
+- `fundamental`
+- `announcements`
+- `moneyflow`
+- `market_context`
+- `data_gaps`
+- `data_audit`
+- `risk_flags`
+- `trace`
+
+`raw_data.json` 保存规范化后的原始数据快照，用于审计，不包含 token 或密钥。
 
 ## 使用
 
@@ -74,7 +103,31 @@ output/{symbol}/report.md
 - `moneyflow`
 - `market_context`
 - `data_gaps`
+- `data_audit`
 - `risk_flags`
+
+## 配置
+
+评分权重位于：
+
+```text
+config/scoring_weights.json
+```
+
+股票中文名默认映射在 `stock_analyze/symbols.py` 中。可选缓存文件：
+
+```text
+config/symbol_cache.json
+```
+
+格式示例：
+
+```json
+{
+  "贵州茅台": "600519.SH",
+  "宁德时代": "300750.SZ"
+}
+```
 
 观察池输出：
 

@@ -4,7 +4,8 @@ from datetime import datetime
 from typing import Any
 
 from .data_provider import MarketDataProvider
-from .indicators import macd, moving_average, pct_change, rsi
+from .announcements import enrich_announcements
+from .indicators import atr, bollinger, macd, max_drawdown, moving_average, pct_change, rsi, volatility
 from .models import AnalysisRequest
 
 
@@ -19,7 +20,7 @@ def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDat
     last = bars[-1]
     basic = provider.fetch_basic(symbol, last.date)
     financials = provider.fetch_financials(symbol, request.period.start_date, request.period.end_date)
-    announcements = provider.fetch_announcements(symbol, request.period.start_date, request.period.end_date)
+    announcements = enrich_announcements(provider.fetch_announcements(symbol, request.period.start_date, request.period.end_date))
     moneyflow = provider.fetch_moneyflow(symbol, request.period.start_date, request.period.end_date)
     market_context = provider.fetch_market_context(last.date)
     data_gaps = _collect_data_gaps(financials, moneyflow, market_context, announcements)
@@ -32,6 +33,10 @@ def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDat
         "ma250": moving_average(closes, 250),
         "rsi14": rsi(closes, 14),
         "macd": macd(closes),
+        "bollinger20": bollinger(closes, 20),
+        "atr14": atr(highs, lows, closes, 14),
+        "max_drawdown_60d_pct": max_drawdown(closes, 60),
+        "volatility_20d_pct": volatility(closes, 20),
         "vol_ma5": moving_average(volumes, 5),
         "vol_ma20": moving_average(volumes, 20),
         "ret_5d_pct": pct_change(closes, 5),
@@ -56,6 +61,7 @@ def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDat
     }
     return {
         "meta": {
+            "contract_version": "1.1.0",
             "symbol": symbol,
             "market": "A-share",
             "currency": "CNY",
@@ -65,6 +71,11 @@ def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDat
             "data_delay_note": "日线数据可能存在数据源刷新延迟，不是 tick 级实时行情。",
         },
         "request": request.to_dict(),
+        "data_contract": {
+            "required_sections": ["meta", "quote", "daily_bars", "indicators", "fundamental", "moneyflow", "market_context"],
+            "numeric_source_rule": "所有数值结论必须来自 market_pack.json，不允许模型记忆补数。",
+            "staleness_rule": "trade_date 是行情交易日，as_of 是本地生成时间。",
+        },
         "quote": quote,
         "daily_bars": [bar.to_dict() for bar in bars],
         "indicators": indicators,
@@ -90,6 +101,7 @@ def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDat
         "market_context": market_context,
         "data_gaps": data_gaps,
         "risk_flags": _risk_flags(basic, indicators, financials, moneyflow, market_context, announcements),
+        "data_audit": _build_data_audit(bars, indicators, financials, moneyflow, market_context, announcements, data_gaps),
         "trace": {
             "quote.close": "daily_bars[-1].close",
             "indicators.ma20": "computed from daily_bars.close[-20:]",
@@ -133,8 +145,7 @@ def _risk_flags(
     sentiment = (market_context.get("sentiment") or {})
     if sentiment.get("limit_down_count", 0) > sentiment.get("limit_up_count", 0):
         flags.append("MARKET_SENTIMENT_WEAK")
-    event_words = ("减持", "解禁", "处罚", "立案", "亏损", "退市", "风险")
-    if any(any(word in str(item.get("title") or "") for word in event_words) for item in announcements[:5]):
+    if any(item.get("risk_level") in {"medium", "high"} for item in announcements[:5]):
         flags.append("ANNOUNCEMENT_EVENT_RISK")
     return flags
 
@@ -161,3 +172,27 @@ def _collect_data_gaps(
     if industry.get("status") == "not_configured":
         gaps.append("industry_index_mapping_not_configured")
     return sorted(set(gaps))
+
+
+def _build_data_audit(
+    bars: list[Any],
+    indicators: dict[str, Any],
+    financials: dict[str, Any],
+    moneyflow: dict[str, Any],
+    market_context: dict[str, Any],
+    announcements: list[dict[str, Any]],
+    data_gaps: list[str],
+) -> dict[str, Any]:
+    return {
+        "daily_bars_count": len(bars),
+        "has_ma20": indicators.get("ma20") is not None,
+        "has_ma60": indicators.get("ma60") is not None,
+        "has_financials": bool(financials.get("latest")),
+        "has_moneyflow": bool(moneyflow.get("latest")),
+        "has_market_indices": bool(market_context.get("indices")),
+        "has_market_sentiment": bool(market_context.get("sentiment")),
+        "announcements_count": len(announcements),
+        "high_risk_announcements_count": sum(1 for item in announcements if item.get("risk_level") == "high"),
+        "data_gaps_count": len(data_gaps),
+        "data_gaps": data_gaps,
+    }

@@ -61,3 +61,53 @@ def pct_change(values: list[float], window: int) -> float | None:
         return None
     return round((values[-1] / values[-window - 1] - 1) * 100, 2)
 
+
+def bollinger(values: list[float], window: int = 20) -> dict[str, float | None]:
+    if len(values) < window:
+        return {"upper": None, "middle": None, "lower": None, "width": None}
+    sample = values[-window:]
+    middle = mean(sample)
+    variance = mean([(value - middle) ** 2 for value in sample])
+    std = variance**0.5
+    upper = middle + 2 * std
+    lower = middle - 2 * std
+    width = (upper - lower) / middle if middle else None
+    return {
+        "upper": round(upper, 4),
+        "middle": round(middle, 4),
+        "lower": round(lower, 4),
+        "width": round(width, 4) if width is not None else None,
+    }
+
+
+def atr(highs: list[float], lows: list[float], closes: list[float], window: int = 14) -> float | None:
+    if len(highs) <= window or len(lows) <= window or len(closes) <= window:
+        return None
+    trs: list[float] = []
+    for i in range(1, len(closes)):
+        trs.append(max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1])))
+    return round(mean(trs[-window:]), 4)
+
+
+def max_drawdown(values: list[float], window: int = 60) -> float | None:
+    if len(values) < 2:
+        return None
+    sample = values[-window:] if len(values) >= window else values
+    peak = sample[0]
+    worst = 0.0
+    for value in sample:
+        peak = max(peak, value)
+        if peak:
+            worst = min(worst, value / peak - 1)
+    return round(worst * 100, 2)
+
+
+def volatility(values: list[float], window: int = 20) -> float | None:
+    if len(values) <= window:
+        return None
+    returns = [(cur / prev - 1) for prev, cur in zip(values[-window - 1 : -1], values[-window:]) if prev]
+    if not returns:
+        return None
+    avg = mean(returns)
+    variance = mean([(item - avg) ** 2 for item in returns])
+    return round((variance**0.5) * 100, 4)

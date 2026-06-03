@@ -20,7 +20,7 @@ def run_analysis(text: str, out_dir: Path = Path("output"), provider: MarketData
         scorecard = build_scorecard(pack)
         symbol_dir = out_dir / symbol
         write_json(symbol_dir / "request.json", request.to_dict())
-        write_json(symbol_dir / "raw_data.json", {"daily_bars": pack["daily_bars"]})
+        write_json(symbol_dir / "raw_data.json", _build_raw_data(pack))
         write_json(symbol_dir / "market_pack.json", pack)
         write_json(symbol_dir / "scorecard.json", scorecard)
         write_text(symbol_dir / "audit.md", render_audit(pack, scorecard))
@@ -33,3 +33,25 @@ def run_analysis(text: str, out_dir: Path = Path("output"), provider: MarketData
         write_text(out_dir / "watchlist_report.md", render_watchlist_report(results))
     return {"request": request.to_dict(), "results": results}
 
+
+def _build_raw_data(pack: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "meta": {
+            "symbol": pack["meta"]["symbol"],
+            "trade_date": pack["meta"]["trade_date"],
+            "as_of": pack["meta"]["as_of"],
+            "note": "raw_data.json 保存规范化后的原始数据响应快照，用于审计；不包含 token 或密钥。",
+        },
+        "daily_bars": pack.get("daily_bars") or [],
+        "basic": {
+            "pe_ttm": (pack.get("fundamental") or {}).get("pe_ttm"),
+            "pb": (pack.get("fundamental") or {}).get("pb"),
+            "market_cap": (pack.get("fundamental") or {}).get("market_cap"),
+            "circ_market_cap": (pack.get("fundamental") or {}).get("circ_market_cap"),
+        },
+        "financials": pack.get("fundamental") or {},
+        "announcements": pack.get("announcements") or [],
+        "moneyflow": pack.get("moneyflow") or {},
+        "market_context": pack.get("market_context") or {},
+        "data_gaps": pack.get("data_gaps") or [],
+    }

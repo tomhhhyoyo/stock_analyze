@@ -182,12 +182,23 @@ def render_dossier(pack: dict[str, Any], scorecard: dict[str, Any]) -> str:
 def render_watchlist_report(results: list[dict[str, Any]]) -> str:
     lines = ["# 观察池对比报告", "", "## 核心结论", ""]
     ranked = sorted(results, key=lambda item: item["scorecard"]["scores"]["total"], reverse=True)
+    for idx, item in enumerate(ranked, 1):
+        sc = item["scorecard"]
+        ev = sc.get("evidence") or {}
+        flags = sc.get("risk_flags") or []
+        lines.append(
+            f"- **第 {idx} 档 {sc['symbol']}**：评级 {sc['rating']}，总分 {sc['scores']['total']}/100，交易日 {sc['trade_date']}，"
+            f"20日涨跌幅 {ev.get('ret_20d_pct')}%，5日资金净流入 {ev.get('moneyflow_net_amount_5d')}，风险标记 {len(flags)} 个。"
+        )
+    lines.extend(["", "## 分项评分", ""])
     for item in ranked:
         sc = item["scorecard"]
+        scores = sc["scores"]
         lines.append(
-            f"- **{sc['symbol']}**：评级 {sc['rating']}，总分 {sc['scores']['total']}/100，交易日 {sc['trade_date']}"
+            f"- **{sc['symbol']}**：趋势 {scores.get('trend')}/100，基本面 {scores.get('fundamental')}/100，"
+            f"估值 {scores.get('valuation')}/100，资金流 {scores.get('moneyflow')}/100，风险 {scores.get('risk')}/100。"
         )
-    lines.extend(["", "## 风险提示", "", "- 观察池报告只做横向研究排序，不构成买入推荐。"])
+    lines.extend(["", "## 风险提示", "", "- 观察池报告只做横向研究排序，不构成买入推荐。", "- 如需单票详细证据，请查看各股票目录下的 `report.md` 和 `market_pack.json`。"])
     return "\n".join(lines) + "\n"
 
 

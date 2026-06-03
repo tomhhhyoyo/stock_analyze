@@ -1,47 +1,96 @@
 # AGENTS.md
 
-本项目是中文 A 股多维研究 Skill。所有任务优先遵循根目录 `SKILL.md`。
+## 项目定位
 
-## 交互方式
+本项目是中文 A 股多维研究 Skill / CLI 工具。它优化现有项目，不重建架构，不改变用户入口。普通用户通过“命令 + 自然语言”使用；CLI 是内部执行工具。
 
-用户通过“Skill 命令 + 自然语言”输入需求：
+## 三命令入口
 
-- `/股票 分析 600519.SH`
-- `/持仓 300750.SZ，成本 185.30，持仓 200 股`
-- `/观察池 600519.SH、300750.SZ、000001.SZ，做对比`
+只允许三个主命令：
 
-CLI 是内部执行工具，不要求普通用户记忆复杂参数。
+- `/股票`
+- `/持仓`
+- `/观察池`
 
-## 执行流程
+不要新增 `/技术`、`/风险`、`/公告`、`/复盘`、`/买入`、`/卖出` 或其他用户入口。自然语言中的“技术面、公告、风险、财务、资金流”等词只进入 `focus` 字段。
 
-1. 解析用户命令。
-2. 生成内部请求对象。
-3. 调用数据源生成 `market_pack.json`。
-4. 生成 `scorecard.json`。
-5. 生成中文报告、审计和证据链。
-6. 读取报告后在对话中输出中文摘要。
+## 数据源说明
 
-## 禁止行为
+- `TUSHARE_TOKEN` 只能从环境变量读取。
+- 设置 `TUSHARE_TOKEN` 时优先使用 Tushare Pro。
+- 未设置 token 时使用 Akshare 日线 fallback。
+- 外部接口失败必须写入 `data_gaps`，不得编造数据。
+- 测试必须使用 `StaticProvider` 或 fake provider，不访问真实网络服务。
 
-- 不编造行情、成交量、估值、财务和技术指标。
-- 不直接输出买入、卖出、满仓、清仓等指令。
-- 不输出目标价。
-- 不把网页搜索结果作为价格、均线、成交量、估值的唯一计算来源。
-- 不把 token、secret、cookie 写入代码、测试或日志。
+## 数据契约说明
 
-## 常用命令
+`market_pack.json` 是唯一数值事实来源，必须保存：
 
-```bash
-python -m stock_analyze "/股票 分析 600519.SH，最近两年"
-python -m stock_analyze "/持仓 300750.SZ，成本 185.30，持仓 200 股"
-python -m stock_analyze "/观察池 600519.SH、300750.SZ、000001.SZ"
-```
+- `meta`
+- `request`
+- `data_contract`
+- `quote`
+- `daily_bars`
+- `indicators`
+- `fundamental`
+- `announcements`
+- `moneyflow`
+- `market_context`
+- `data_gaps`
+- `data_audit`
+- `risk_flags`
+- `trace`
 
-## 测试
+`raw_data.json` 保存规范化原始数据快照，不允许包含 token、secret、cookie。
+
+## 测试规则
+
+运行：
 
 ```bash
 python -m pytest
 ```
 
-测试必须使用 fake/static provider，不访问真实外部服务。
+测试必须覆盖：
+
+- 三命令解析
+- 股票代码和中文名识别
+- 时间范围解析
+- 持仓信息解析
+- `market_pack.json` 关键字段
+- `raw_data.json` 落盘
+- 观察池报告
+- 评分权重配置
+
+## 代码风格
+
+- 保持现有轻量 Python 包结构。
+- 优先小函数、清晰数据结构、可测试逻辑。
+- 外部数据源通过 provider 接口封装。
+- 报告、日志和说明默认中文。
+- 不引入不必要的大型框架。
+
+## 禁止行为
+
+- 不编造行情、成交量、估值、财务、资金流、指数、公告数据。
+- 不输出直接买入、卖出、满仓、清仓。
+- 不输出目标价。
+- 不把网页搜索结果作为交易数值依据。
+- 不提交 `.venv/`、`.pytest_cache/`、`output/`、`.env`。
+- 不删除测试或弱化断言来通过测试。
+
+## 修改前检查清单
+
+- 已阅读 `README.md`、`SKILL.md`、`AGENTS.md`。
+- 已阅读 `stock_analyze/` 核心代码。
+- 已确认不改变三命令入口。
+- 已确认不会提交 token 或运行产物。
+
+## 修改后检查清单
+
+- 运行 `python -m pytest`。
+- 检查 `git status --short --ignored`。
+- 确认 `.venv/`、`.pytest_cache/`、`output/` 被忽略。
+- 确认报告中文、无目标价、无直接买卖建议。
+- 确认所有数值来自 `market_pack.json`。
 

@@ -28,12 +28,16 @@ class Position:
     cost_price: float | None = None
     shares: int | None = None
     portfolio_weight: float | None = None
+    holding_period: str | None = None
+    pnl_description: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "cost_price": self.cost_price,
             "shares": self.shares,
             "portfolio_weight": self.portfolio_weight,
+            "holding_period": self.holding_period,
+            "pnl_description": self.pnl_description,
         }
 
 
@@ -87,4 +91,3 @@ class DailyBar:
             "volume": self.volume,
             "amount": self.amount,
         }
-

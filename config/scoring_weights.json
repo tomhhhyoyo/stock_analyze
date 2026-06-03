@@ -1,0 +1,21 @@
+{
+  "weights": {
+    "trend": 0.3,
+    "volume_price": 0.15,
+    "fundamental": 0.15,
+    "valuation": 0.15,
+    "moneyflow": 0.1,
+    "market_context": 0.05,
+    "risk": 0.1
+  },
+  "rating_thresholds": {
+    "watch": 72,
+    "neutral": 50
+  },
+  "risk_penalty_per_flag": 12,
+  "gap_penalty": {
+    "critical": 6,
+    "warning": 3,
+    "info": 1
+  }
+}

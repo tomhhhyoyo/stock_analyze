@@ -66,6 +66,7 @@ def test_run_single_stock_analysis(tmp_path: Path):
 
     assert result["results"][0]["scorecard"]["rating"] in {"watch", "neutral", "avoid"}
     assert (tmp_path / "600519.SH" / "market_pack.json").exists()
+    assert (tmp_path / "600519.SH" / "raw_data.json").exists()
     assert (tmp_path / "600519.SH" / "scorecard.json").exists()
     assert (tmp_path / "600519.SH" / "report.md").exists()
     assert (tmp_path / "600519.SH" / "audit.md").exists()
@@ -74,6 +75,12 @@ def test_run_single_stock_analysis(tmp_path: Path):
     assert pack["moneyflow"]["latest"]["net_amount_5d"] == 50
     assert pack["market_context"]["indices"][0]["name"] == "上证指数"
     assert pack["announcements"][0]["title"] == "一季度报告"
+    assert "data_contract" in pack
+    assert "data_audit" in pack
+    assert pack["indicators"]["bollinger20"]["middle"] is not None
+    raw = json.loads((tmp_path / "600519.SH" / "raw_data.json").read_text(encoding="utf-8"))
+    assert "financials" in raw
+    assert "moneyflow" in raw
     report = (tmp_path / "600519.SH" / "report.md").read_text(encoding="utf-8")
     assert "资金流分析" in report
     assert "公告与事件风险" in report
@@ -86,3 +93,13 @@ def test_run_position_analysis(tmp_path: Path):
 
     text = (tmp_path / "600519.SH" / "position_report.md").read_text(encoding="utf-8")
     assert "相对成本" in text
+
+
+def test_run_watchlist_analysis(tmp_path: Path):
+    provider = StaticProvider(_bars(), {"source": "static"})
+
+    run_analysis("/观察池 600519.SH、300750.SZ，做多维对比", tmp_path, provider)
+
+    text = (tmp_path / "watchlist_report.md").read_text(encoding="utf-8")
+    assert "分项评分" in text
+    assert "不构成买入推荐" in text
