@@ -1,7 +1,8 @@
 from datetime import date
+import json
 
 from stock_analyze.parser import normalize_symbol, parse_user_request
-from stock_analyze.symbols import extract_symbols
+from stock_analyze.symbols import extract_symbols, refresh_symbol_cache
 
 
 def test_parse_single_stock_request():
@@ -48,3 +49,33 @@ def test_parse_focus_extended():
     assert req.symbols == ["600050.SH"]
     assert "解禁" in req.focus
     assert "行业环境" in req.focus
+
+
+def test_extract_symbols_with_generated_symbol_cache(tmp_path):
+    cache_path = tmp_path / "symbol_cache.json"
+    cache_path.write_text(
+        json.dumps(
+            {
+                "updated_at": "2026-06-03T10:00:00",
+                "source": "tushare.stock_basic",
+                "count": 1,
+                "items": [{"name": "中国电信", "ts_code": "601728.SH", "symbol": "601728"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    assert extract_symbols("/股票 分析下中国电信", cache_path=cache_path) == ["601728.SH"]
+
+
+def test_refresh_symbol_cache_normalizes_tushare_rows(tmp_path):
+    cache_path = refresh_symbol_cache(
+        [
+            {"name": "中国电信", "ts_code": "601728.SH", "symbol": "601728", "market": "主板"},
+            {"name": "平安银行", "ts_code": "000001.SZ", "symbol": "000001", "market": "主板"},
+        ],
+        tmp_path / "symbol_cache.json",
+    )
+
+    assert extract_symbols("中国电信、平安银行", cache_path=cache_path) == ["601728.SH", "000001.SZ"]

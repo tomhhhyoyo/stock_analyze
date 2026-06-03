@@ -19,6 +19,7 @@
 - `TUSHARE_TOKEN` 只能从环境变量读取。
 - 生产分析必须使用 Tushare Pro。
 - 未设置 `TUSHARE_TOKEN` 时必须直接失败，不允许使用其他行情源回退。
+- 中文股票名映射必须优先来自 Tushare `stock_basic` 生成的 `config/symbol_cache.json`，不要在代码里逐个补热门股票。
 - 外部接口失败必须写入 `data_gaps`，不得编造数据。
 - 测试必须使用 `StaticProvider` 或 fake provider，不访问真实网络服务。
 
@@ -77,6 +78,7 @@ python -m pytest
 - 不输出目标价。
 - 不把网页搜索结果作为交易数值依据。
 - 不提交 `.venv/`、`.pytest_cache/`、`output/`、`.env`。
+- 不提交 `config/symbol_cache.json`，它是运行时缓存。
 - 不删除测试或弱化断言来通过测试。
 
 ## 修改前检查清单

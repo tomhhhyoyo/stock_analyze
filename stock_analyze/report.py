@@ -3,6 +3,19 @@ from __future__ import annotations
 from typing import Any
 
 
+RISK_FLAG_DESCRIPTIONS = {
+    "PE_TTM_HIGH": "PE TTM 偏高，估值容错空间较低",
+    "PB_HIGH": "PB 偏高，账面估值压力较大",
+    "MA20_BELOW_MA60": "MA20 低于 MA60，中期均线结构偏弱",
+    "RECENT_DRAWDOWN": "近20日回撤较大，短期波动风险上升",
+    "NET_PROFIT_GROWTH_NEGATIVE": "归母净利润同比为负，盈利增长承压",
+    "REVENUE_GROWTH_NEGATIVE": "营收同比为负，收入增长承压",
+    "MONEYFLOW_5D_NEGATIVE": "近5日资金净流出，资金面偏弱",
+    "MARKET_SENTIMENT_WEAK": "跌停样本多于涨停样本，市场情绪偏弱",
+    "ANNOUNCEMENT_EVENT_RISK": "近期公告存在中高风险事件，需复核公告原文",
+}
+
+
 def render_report(pack: dict[str, Any], scorecard: dict[str, Any], position: dict[str, Any] | None = None) -> str:
     symbol = pack["meta"]["symbol"]
     trade_date = pack["meta"]["trade_date"]
@@ -305,7 +318,11 @@ def _risk_lines(pack: dict[str, Any]) -> str:
     flags = pack.get("risk_flags") or []
     if not flags:
         return "- **风险标记**：暂无自动风险标记。"
-    return "\n".join(f"- **{flag}**：需复核。" for flag in flags)
+    return "\n".join(f"- **{_risk_description(flag)}**（风险码：`{flag}`）：需复核。" for flag in flags)
+
+
+def _risk_description(flag: str) -> str:
+    return RISK_FLAG_DESCRIPTIONS.get(flag, "未配置中文说明的风险标记")
 
 
 def _gap_lines(pack: dict[str, Any]) -> str:

@@ -9,11 +9,14 @@ from .pack import build_market_pack
 from .parser import parse_user_request
 from .report import render_audit, render_dossier, render_report, render_watchlist_report
 from .scoring import build_scorecard
+from .symbols import ensure_symbol_cache
 
 
 def run_analysis(text: str, out_dir: Path = Path("output"), provider: MarketDataProvider | None = None) -> dict[str, Any]:
+    if provider is None:
+        provider = default_provider()
+        ensure_symbol_cache(provider)
     request = parse_user_request(text)
-    provider = provider or default_provider()
     results: list[dict[str, Any]] = []
     for symbol in request.symbols:
         pack = build_market_pack(request, symbol, provider)

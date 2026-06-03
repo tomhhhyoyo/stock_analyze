@@ -8,6 +8,9 @@ from .models import DailyBar
 
 
 class MarketDataProvider(Protocol):
+    def fetch_stock_list(self) -> list[dict]:
+        ...
+
     def fetch_daily_bars(self, symbol: str, start_date: date, end_date: date) -> list[DailyBar]:
         ...
 
@@ -35,6 +38,16 @@ class TushareProvider:
         import tushare as ts
 
         self.pro = ts.pro_api(self.token)
+
+    def fetch_stock_list(self) -> list[dict]:
+        df = self.pro.stock_basic(
+            exchange="",
+            list_status="L",
+            fields="ts_code,symbol,name,area,industry,market,list_date",
+        )
+        if df is None or df.empty:
+            raise RuntimeError("Tushare 未返回股票基础列表。")
+        return df.to_dict("records")
 
     def fetch_daily_bars(self, symbol: str, start_date: date, end_date: date) -> list[DailyBar]:
         df = self.pro.daily(
@@ -254,6 +267,9 @@ class StaticProvider:
 
     def fetch_daily_bars(self, symbol: str, start_date: date, end_date: date) -> list[DailyBar]:
         return [bar for bar in self.bars if start_date.isoformat() <= bar.date <= end_date.isoformat()]
+
+    def fetch_stock_list(self) -> list[dict]:
+        return list(self.basic.get("stock_list") or [])
 
     def fetch_basic(self, symbol: str, trade_date: str | None = None) -> dict:
         return dict(self.basic)

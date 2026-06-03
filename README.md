@@ -42,6 +42,7 @@ export TUSHARE_TOKEN=your_token
 - 资金流：`moneyflow`
 - 指数环境：`index_daily`
 - 市场情绪：`limit_list_d`
+- 股票名称映射：`stock_basic`
 
 行业指数已保留输出字段，但需要后续配置“股票到行业指数代码”的映射后才能精确拉取。
 
@@ -114,18 +115,29 @@ output/{symbol}/report.md
 config/scoring_weights.json
 ```
 
-股票中文名默认映射在 `stock_analyze/symbols.py` 中。可选缓存文件：
+股票中文名映射不再依赖少量手工字典。程序真实运行时会先通过 Tushare `stock_basic` 拉取当前上市 A 股基础列表，并生成本地缓存：
 
 ```text
 config/symbol_cache.json
 ```
 
-格式示例：
+该文件是运行缓存，已加入 `.gitignore`，不会提交到仓库。解析 `/股票 中国电信`、`/观察池 贵州茅台、宁德时代` 这类中文名时，会优先读取缓存；代码中的内置映射只作为缓存不存在时的离线兜底。
+
+缓存格式示例：
 
 ```json
 {
-  "贵州茅台": "600519.SH",
-  "宁德时代": "300750.SZ"
+  "updated_at": "2026-06-03T10:00:00",
+  "source": "tushare.stock_basic",
+  "count": 2,
+  "items": [
+    {
+      "name": "贵州茅台",
+      "ts_code": "600519.SH",
+      "symbol": "600519",
+      "market": "主板"
+    }
+  ]
 }
 ```
 

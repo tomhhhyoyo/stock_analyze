@@ -17,6 +17,7 @@ htmlcov/
 
 # Runtime outputs
 output/
+config/symbol_cache.json
 
 # Local secrets and env files
 .env
@@ -28,4 +29,3 @@ output/
 .DS_Store
 .idea/
 .vscode/
-

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 DEFAULT_NAME_TO_SYMBOL = {
     "贵州茅台": "600519.SH",
@@ -26,6 +28,8 @@ DEFAULT_NAME_TO_SYMBOL = {
     "万科A": "000002.SZ",
     "格力电器": "000651.SZ",
 }
+
+DEFAULT_SYMBOL_CACHE_PATH = Path("config/symbol_cache.json")
 
 
 def infer_exchange(code: str) -> str:
@@ -51,12 +55,14 @@ def normalize_symbol(symbol: str) -> str:
 
 
 def load_symbol_cache(path: str | Path | None = None) -> dict[str, list[str]]:
-    cache_path = Path(path or "config/symbol_cache.json")
+    cache_path = Path(path or DEFAULT_SYMBOL_CACHE_PATH)
     if not cache_path.exists():
         return {}
     data = json.loads(cache_path.read_text(encoding="utf-8"))
     result: dict[str, list[str]] = {}
-    if isinstance(data, dict):
+    if isinstance(data, dict) and isinstance(data.get("items"), list):
+        items = ((str(item.get("name", "")), item.get("ts_code") or item.get("symbol")) for item in data["items"] if isinstance(item, dict))
+    elif isinstance(data, dict):
         items = data.items()
     elif isinstance(data, list):
         items = ((str(item.get("name", "")), item.get("ts_code") or item.get("symbol")) for item in data if isinstance(item, dict))
@@ -75,6 +81,61 @@ def load_symbol_cache(path: str | Path | None = None) -> dict[str, list[str]]:
             if normalized not in result[name]:
                 result[name].append(normalized)
     return result
+
+
+def refresh_symbol_cache(stock_list: list[dict[str, Any]], path: str | Path | None = None) -> Path:
+    cache_path = Path(path or DEFAULT_SYMBOL_CACHE_PATH)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    rows = []
+    seen: set[tuple[str, str]] = set()
+    for item in stock_list:
+        name = str(item.get("name") or "").strip()
+        ts_code = str(item.get("ts_code") or item.get("symbol") or "").strip()
+        if not name or not ts_code:
+            continue
+        try:
+            normalized = normalize_symbol(ts_code)
+        except ValueError:
+            continue
+        key = (name, normalized)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append(
+            {
+                "name": name,
+                "ts_code": normalized,
+                "symbol": str(item.get("symbol") or normalized.split(".")[0]),
+                "market": item.get("market"),
+                "industry": item.get("industry"),
+                "list_date": item.get("list_date"),
+            }
+        )
+    payload = {
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+        "source": "tushare.stock_basic",
+        "count": len(rows),
+        "items": sorted(rows, key=lambda row: row["ts_code"]),
+    }
+    cache_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return cache_path
+
+
+def ensure_symbol_cache(provider: Any, path: str | Path | None = None, max_age_days: int = 7) -> Path | None:
+    cache_path = Path(path or DEFAULT_SYMBOL_CACHE_PATH)
+    if _is_cache_fresh(cache_path, max_age_days):
+        return cache_path
+    fetcher = getattr(provider, "fetch_stock_list", None)
+    if not callable(fetcher):
+        return cache_path if cache_path.exists() else None
+    return refresh_symbol_cache(fetcher(), cache_path)
+
+
+def _is_cache_fresh(path: Path, max_age_days: int) -> bool:
+    if not path.exists():
+        return False
+    mtime = datetime.fromtimestamp(path.stat().st_mtime)
+    return datetime.now() - mtime <= timedelta(days=max_age_days)
 
 
 def lookup_symbol_by_name(name: str, cache: dict[str, list[str]] | None = None) -> str | None:
@@ -112,4 +173,3 @@ def extract_symbols(text: str, cache_path: str | Path | None = None) -> list[str
         if symbol:
             found.append(symbol)
     return found
-
