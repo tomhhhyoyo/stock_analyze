@@ -95,11 +95,13 @@ def test_run_single_stock_analysis(tmp_path: Path):
     assert "announcements" in raw
     assert "moneyflow" in raw
     assert "market_context" in raw
+    assert "market_sentiment" in raw
     report = (output_dir / "report.md").read_text(encoding="utf-8")
     assert "# 贵州茅台（600519.SH）中文多维研究报告" in report
     assert "**股票**：贵州茅台（600519.SH）" in report
     assert "资金流分析" in report
     assert "公告与事件风险" in report
+    assert "市场情绪与涨跌停结构" in report
 
 
 def test_report_uses_chinese_risk_descriptions(tmp_path: Path):
@@ -153,6 +155,39 @@ def test_run_watchlist_analysis(tmp_path: Path):
     assert "贵州茅台（600519.SH）" in text
     assert "宁德时代（300750.SZ）" in text
     assert "不构成买入推荐" in text
+
+
+def test_pipeline_keeps_running_when_market_sentiment_warns(tmp_path: Path):
+    provider = StaticProvider(
+        _bars(),
+        {
+            "source": "static",
+            "market_context": {
+                "source": "static",
+                "indices": [{"name": "上证指数", "trade_date": "2026-05-24", "close": 3000, "pct_chg": 0.5}],
+                "industry": {"status": "not_configured"},
+                "sentiment": {
+                    "trade_date": "2026-05-24",
+                    "source": "market_sentiment_unavailable",
+                    "sentiment_score": 50,
+                    "sentiment_label": "数据不足",
+                    "data_quality": "warning",
+                    "warnings": [{"source": "market_sentiment", "message": "多源数据均未返回"}],
+                },
+                "gaps": [],
+            },
+        },
+    )
+
+    result = run_analysis("/股票 分析 600519.SH，最近两年", tmp_path, provider)
+
+    pack = result["results"][0]["pack"]
+    scores = result["results"][0]["scorecard"]["scores"]
+    assert pack["market_sentiment"]["data_quality"] == "warning"
+    assert pack["data_audit"]["optional_fields_missing"][0]["field"] == "market_sentiment"
+    assert scores["trend"] is not None
+    assert scores["valuation"] is not None
+    assert scores["fundamental"] is not None
 
 
 def test_default_provider_requires_tushare_token(monkeypatch):

@@ -24,6 +24,7 @@ def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDat
     announcements = enrich_announcements(provider.fetch_announcements(symbol, request.period.start_date, request.period.end_date))
     moneyflow = provider.fetch_moneyflow(symbol, request.period.start_date, request.period.end_date)
     market_context = provider.fetch_market_context(last.date, symbol)
+    market_sentiment = market_context.get("sentiment") or {}
     data_gaps = _collect_data_gaps(financials, moneyflow, market_context, announcements)
     indicators = {
         "ma5": moving_average(closes, 5),
@@ -76,7 +77,16 @@ def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDat
         },
         "request": request.to_dict(),
         "data_contract": {
-            "required_sections": ["meta", "quote", "daily_bars", "indicators", "fundamental", "moneyflow", "market_context"],
+            "required_sections": [
+                "meta",
+                "quote",
+                "daily_bars",
+                "indicators",
+                "fundamental",
+                "moneyflow",
+                "market_context",
+                "market_sentiment",
+            ],
             "numeric_source_rule": "所有数值结论必须来自 market_pack.json，不允许模型记忆补数。",
             "staleness_rule": "trade_date 是行情交易日，as_of 是本地生成时间。",
         },
@@ -103,9 +113,12 @@ def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDat
         "announcements": announcements,
         "moneyflow": moneyflow,
         "market_context": market_context,
+        "market_sentiment": market_sentiment,
         "data_gaps": data_gaps,
         "risk_flags": _risk_flags(basic, indicators, financials, moneyflow, market_context, announcements),
-        "data_audit": _build_data_audit(bars, indicators, financials, moneyflow, market_context, announcements, data_gaps),
+        "data_audit": _build_data_audit(
+            bars, indicators, financials, moneyflow, market_context, market_sentiment, announcements, data_gaps
+        ),
         "trace": {
             "quote.close": "daily_bars[-1].close",
             "indicators.ma20": "computed from daily_bars.close[-20:]",
@@ -147,7 +160,9 @@ def _risk_flags(
     if mf.get("net_amount_5d") is not None and mf["net_amount_5d"] < 0:
         flags.append("MONEYFLOW_5D_NEGATIVE")
     sentiment = (market_context.get("sentiment") or {})
-    if sentiment.get("limit_down_count", 0) > sentiment.get("limit_up_count", 0):
+    down_count = sentiment.get("down_limit_count", sentiment.get("limit_down_count", 0)) or 0
+    up_count = sentiment.get("up_limit_count", sentiment.get("limit_up_count", 0)) or 0
+    if down_count > up_count:
         flags.append("MARKET_SENTIMENT_WEAK")
     if any(item.get("risk_level") in {"medium", "high"} for item in announcements[:5]):
         flags.append("ANNOUNCEMENT_EVENT_RISK")
@@ -186,9 +201,20 @@ def _build_data_audit(
     financials: dict[str, Any],
     moneyflow: dict[str, Any],
     market_context: dict[str, Any],
+    market_sentiment: dict[str, Any],
     announcements: list[dict[str, Any]],
     data_gaps: list[str],
 ) -> dict[str, Any]:
+    optional_missing = []
+    if not market_sentiment or market_sentiment.get("data_quality") == "warning":
+        optional_missing.append(
+            {
+                "field": "market_sentiment",
+                "level": "warning",
+                "message": "市场情绪多源数据未完整返回，已按中性降级，不影响技术面、估值和基本面评分。",
+                "warnings": (market_sentiment or {}).get("warnings", []),
+            }
+        )
     return {
         "daily_bars_count": len(bars),
         "has_ma20": indicators.get("ma20") is not None,
@@ -196,9 +222,10 @@ def _build_data_audit(
         "has_financials": bool(financials.get("latest")),
         "has_moneyflow": bool(moneyflow.get("latest")),
         "has_market_indices": bool(market_context.get("indices")),
-        "has_market_sentiment": bool(market_context.get("sentiment")),
+        "has_market_sentiment": bool(market_sentiment) and market_sentiment.get("data_quality") != "warning",
         "announcements_count": len(announcements),
         "high_risk_announcements_count": sum(1 for item in announcements if item.get("risk_level") == "high"),
+        "optional_fields_missing": optional_missing,
         "data_gaps_count": len(data_gaps),
         "data_gaps": data_gaps,
     }

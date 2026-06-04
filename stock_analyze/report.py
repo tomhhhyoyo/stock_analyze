@@ -91,6 +91,10 @@ def render_report(pack: dict[str, Any], scorecard: dict[str, Any], position: dic
 
 {_market_context_lines(pack)}
 
+## 市场情绪与涨跌停结构
+
+{_market_sentiment_lines(pack)}
+
 ## 公告与事件风险
 
 {_announcement_lines(pack)}
@@ -157,7 +161,12 @@ def render_audit(pack: dict[str, Any], scorecard: dict[str, Any]) -> str:
 - **fundamental.report_end_date**：{pack.get("fundamental", {}).get("report_end_date") is not None}
 - **moneyflow.latest**：{bool((pack.get("moneyflow") or {}).get("latest"))}
 - **market_context.indices**：{bool((pack.get("market_context") or {}).get("indices"))}
+- **market_sentiment**：{bool(pack.get("market_sentiment")) and (pack.get("market_sentiment") or {}).get("data_quality") != "warning"}
 - **announcements**：{bool(pack.get("announcements"))}
+
+## 可选字段 warning
+
+{_optional_warning_lines(pack)}
 
 ## 数据缺口
 
@@ -358,10 +367,32 @@ def _market_context_lines(pack: dict[str, Any]) -> str:
     sentiment = context.get("sentiment") or {}
     if sentiment:
         lines.append(
-            f"- **市场情绪**：涨停样本 {sentiment.get('limit_up_count')}，跌停样本 {sentiment.get('limit_down_count')}，样本数 {sentiment.get('sample_size')}。"
+            f"- **市场情绪**：情绪标签 {sentiment.get('sentiment_label')}，情绪分 {sentiment.get('sentiment_score')}，来源 {sentiment.get('source')}。"
         )
     else:
         lines.append("- **市场情绪**：涨跌停情绪数据缺失，已记录到数据缺口。")
+    return "\n".join(lines)
+
+
+def _market_sentiment_lines(pack: dict[str, Any]) -> str:
+    sentiment = pack.get("market_sentiment") or (pack.get("market_context") or {}).get("sentiment") or {}
+    if not sentiment:
+        return "- **状态**：市场情绪数据缺失，市场环境分项按中性降级。"
+    lines = [
+        f"- **交易日**：{sentiment.get('trade_date')}",
+        f"- **涨停家数**：{sentiment.get('up_limit_count')}",
+        f"- **跌停家数**：{sentiment.get('down_limit_count')}",
+        f"- **炸板家数**：{sentiment.get('limit_break_count')}",
+        f"- **炸板率**：{sentiment.get('limit_break_rate')}",
+        f"- **最高连板**：{sentiment.get('highest_limit_step')}",
+        f"- **情绪标签**：{sentiment.get('sentiment_label')}（{sentiment.get('sentiment_score')}/100）",
+        f"- **数据来源**：{sentiment.get('source')}，数据质量 {sentiment.get('data_quality')}",
+    ]
+    warnings = sentiment.get("warnings") or []
+    for item in warnings:
+        message = item.get("message") or item.get("exception_message")
+        if message:
+            lines.append(f"- **局限**：{message}")
     return "\n".join(lines)
 
 
@@ -399,6 +430,13 @@ def _gap_lines(pack: dict[str, Any]) -> str:
     if not gaps:
         return "- **数据缺口**：暂无。"
     return "\n".join(f"- **{_gap_description(gap)}**：需复核或补充数据源权限。" for gap in gaps)
+
+
+def _optional_warning_lines(pack: dict[str, Any]) -> str:
+    warnings = ((pack.get("data_audit") or {}).get("optional_fields_missing") or [])
+    if not warnings:
+        return "- **可选字段**：暂无 warning。"
+    return "\n".join(f"- **{item.get('field')}**：{item.get('message')}" for item in warnings)
 
 
 def _gap_description(gap: str) -> str:

@@ -71,5 +71,6 @@ def _build_raw_data(pack: dict[str, Any]) -> dict[str, Any]:
         "announcements": pack.get("announcements") or [],
         "moneyflow": pack.get("moneyflow") or {},
         "market_context": pack.get("market_context") or {},
+        "market_sentiment": pack.get("market_sentiment") or {},
         "data_gaps": pack.get("data_gaps") or [],
     }

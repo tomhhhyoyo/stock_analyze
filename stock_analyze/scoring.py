@@ -31,7 +31,9 @@ def build_scorecard(pack: dict[str, Any]) -> dict[str, Any]:
     fundamental_score = _fundamental_score(pack.get("fundamental") or {})
     valuation_score = _valuation_score(pack.get("fundamental") or {})
     moneyflow_score = _moneyflow_score(pack.get("moneyflow") or {})
-    market_score = _market_score(pack.get("market_context") or {})
+    market_context = pack.get("market_context") or {}
+    market_sentiment = pack.get("market_sentiment") or market_context.get("sentiment") or {}
+    market_score = _market_score(market_context, market_sentiment)
     risk_score = max(
         0,
         100
@@ -66,6 +68,9 @@ def build_scorecard(pack: dict[str, Any]) -> dict[str, Any]:
         "rating": rating,
         "rating_note": "评级仅表示研究观察优先级，不代表买入或卖出建议。",
         "scoring_config": config,
+        "confidence": {
+            "market_context": _market_confidence(market_sentiment),
+        },
         "risk_flags": risk_flags,
         "evidence": _evidence(pack),
     }
@@ -132,15 +137,30 @@ def _moneyflow_score(moneyflow: dict[str, Any]) -> int:
     return _clamp(65 if net_5d > 0 else 35 if net_5d < 0 else 50)
 
 
-def _market_score(market_context: dict[str, Any]) -> int:
+def _market_score(market_context: dict[str, Any], market_sentiment: dict[str, Any] | None = None) -> int:
     indices = market_context.get("indices") or []
+    sentiment = market_sentiment or {}
+    sentiment_score = sentiment.get("sentiment_score")
     if not indices:
-        return 50
-    values = [item.get("pct_chg") for item in indices if item.get("pct_chg") is not None]
-    if not values:
-        return 50
-    avg = sum(values) / len(values)
-    return _clamp(65 if avg > 0.5 else 35 if avg < -0.5 else 50)
+        index_score = 50
+    else:
+        values = [item.get("pct_chg") for item in indices if item.get("pct_chg") is not None]
+        if not values:
+            index_score = 50
+        else:
+            avg = sum(values) / len(values)
+            index_score = _clamp(65 if avg > 0.5 else 35 if avg < -0.5 else 50)
+    if sentiment_score is None or sentiment.get("data_quality") == "warning":
+        return _clamp(index_score - 5)
+    return _clamp(index_score * 0.7 + float(sentiment_score) * 0.3)
+
+
+def _market_confidence(market_sentiment: dict[str, Any]) -> str:
+    if not market_sentiment or market_sentiment.get("data_quality") == "warning":
+        return "warning"
+    if market_sentiment.get("data_quality") == "partial":
+        return "partial"
+    return "full"
 
 
 def _evidence(pack: dict[str, Any]) -> dict[str, Any]:

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from .models import DailyBar
+from .sentiment import fetch_market_sentiment
 
 CACHE_DIR = Path("data_cache")
 INDUSTRY_INDEX_MAP_PATH = Path("config/industry_index_map.json")
@@ -228,7 +229,7 @@ class TushareProvider:
                         "pct_chg": _num(row.get("pct_chg")),
                     }
                 )
-        sentiment = self._fetch_market_sentiment(trade_date, gaps)
+        sentiment = fetch_market_sentiment(self.pro, end)
         industry = self._fetch_industry_context(symbol, end, gaps)
         return {
             "source": "tushare.index_daily/tushare.sw_daily/tushare.limit_list_d",
@@ -315,38 +316,6 @@ class TushareProvider:
         }
         _write_cache(cache_key, result)
         return result
-
-    def _fetch_market_sentiment(self, trade_date: str | None, gaps: list[str]) -> dict:
-        if not trade_date:
-            return {}
-        compact = _compact_date(trade_date)
-        cache_key = f"market_sentiment_{compact}"
-        cached = _read_cache(cache_key)
-        if cached:
-            return cached
-        df = _safe_df(
-            lambda: self.pro.limit_list_d(
-                trade_date=compact,
-                fields="trade_date,ts_code,name,pct_chg,limit",
-            ),
-            "limit_list_d",
-            gaps,
-        )
-        if df is None or df.empty:
-            return {}
-        limit_values = [str(v) for v in df.get("limit", [])]
-        up = sum(1 for v in limit_values if "U" in v.upper() or "涨" in v)
-        down = sum(1 for v in limit_values if "D" in v.upper() or "跌" in v)
-        result = {
-            "trade_date": trade_date,
-            "limit_up_count": up,
-            "limit_down_count": down,
-            "sample_size": int(len(df)),
-            "source": "tushare.limit_list_d",
-        }
-        _write_cache(cache_key, result)
-        return result
-
 
 class StaticProvider:
     def __init__(self, bars: list[DailyBar], basic: dict | None = None) -> None:

@@ -43,10 +43,12 @@ export TUSHARE_TOKEN=your_token
 - 指数环境：`index_daily`
 - 行业分类：`index_member_all`
 - 行业指数：`sw_daily`
-- 市场情绪：`limit_list_d`
+- 市场情绪：优先 `limit_list_d`，降级 `limit_list_ths`，再降级 `stk_limit` + `daily` 近似计算
 - 股票名称映射：`stock_basic`
 
 行业指数会优先通过 Tushare `index_member_all` 自动识别股票所属申万一级行业，再用 `sw_daily` 拉取对应行业指数；`config/industry_index_map.json` 仅用于人工覆盖或兜底。`limit_list_d`、`index_member_all` 和 `sw_daily` 这类频率受限接口会写入 `data_cache/`，同一交易日重复分析时优先使用缓存，避免反复触发 Tushare 限频。
+
+市场情绪如果使用 `stk_limit` + `daily` 兜底，涨跌停状态由日线价格与涨跌停价近似计算，无法覆盖封板时间、封单金额和真实炸板次数。全部来源失败时，市场情绪只作为结构化 warning 记录，主报告和核心技术、估值、基本面分析继续生成。
 
 ## 数据契约
 
@@ -62,6 +64,7 @@ export TUSHARE_TOKEN=your_token
 - `announcements`
 - `moneyflow`
 - `market_context`
+- `market_sentiment`
 - `data_gaps`
 - `data_audit`
 - `risk_flags`
