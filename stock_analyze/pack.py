@@ -90,6 +90,7 @@ def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDat
         "limit_down": last.limit_down,
         "pct_to_limit_up": last.pct_to_limit_up,
         "pct_to_limit_down": last.pct_to_limit_down,
+        "limit_source": last.limit_source,
     }
     fundamental = _build_fundamental(basic, financials)
     tushare_extensions = _build_tushare_extensions(financials)
@@ -166,7 +167,7 @@ def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDat
             "fundamental": "provider.fetch_financials + provider.fetch_basic",
             "fundamental.balance_sheet": "provider.fetch_financials.balancesheet",
             "fundamental.cashflow": "provider.fetch_financials.cashflow",
-            "quote.limit_up/down": "provider.fetch_daily_bars.stk_limit",
+            "quote.limit_up/down": "provider.fetch_daily_bars.stk_limit or daily.pct_chg_estimate",
             "announcements": "provider.fetch_announcements",
             "moneyflow": "provider.fetch_moneyflow",
             "market_context": "provider.fetch_market_context",
@@ -346,6 +347,8 @@ def _build_data_audit(
         "has_adj_factor": any(getattr(bar, "adj_factor", None) is not None for bar in bars),
         "has_qfq_prices": any(getattr(bar, "qfq_close", None) is not None for bar in bars),
         "has_stk_limit": any(getattr(bar, "limit_up", None) is not None and getattr(bar, "limit_down", None) is not None for bar in bars),
+        "limit_price_sources": sorted({getattr(bar, "limit_source", None) for bar in bars if getattr(bar, "limit_source", None)}),
+        "has_estimated_limit_price": any(getattr(bar, "limit_source", None) == "daily.pct_chg_estimate" for bar in bars),
         "has_ma20": indicators.get("ma20") is not None,
         "has_ma60": indicators.get("ma60") is not None,
         "has_financials": bool(financials.get("latest")),

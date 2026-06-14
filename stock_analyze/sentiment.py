@@ -21,6 +21,7 @@ def fetch_market_sentiment(pro: Any, trade_date: str) -> dict[str, Any]:
         ("tushare.limit_list_ths", lambda: _from_limit_list_ths(pro, compact)),
         ("akshare.limit_pool", lambda: _from_akshare_limit_pool(compact)),
         ("tushare.stk_limit+tushare.daily", lambda: _from_stk_limit_daily(pro, compact)),
+        ("tushare.daily_pct", lambda: _from_daily_pct_limit(pro, compact)),
     ]:
         result = _try_source(source, fetcher, warnings)
         if result:
@@ -215,6 +216,35 @@ def _from_stk_limit_daily(pro: Any, trade_date: str) -> dict[str, Any] | None:
     return result
 
 
+def _from_daily_pct_limit(pro: Any, trade_date: str) -> dict[str, Any] | None:
+    df = pro.daily(trade_date=trade_date, fields="ts_code,trade_date,pct_chg")
+    rows = _records(df)
+    if not rows:
+        return None
+    up = 0
+    down = 0
+    for row in rows:
+        code = str(row.get("ts_code") or "")
+        change = _num(row.get("pct_chg"))
+        if change is None:
+            continue
+        threshold = _limit_threshold(code, str(row.get("name") or row.get("名称") or ""))
+        if change >= threshold:
+            up += 1
+        elif change <= -threshold:
+            down += 1
+    if up == 0 and down == 0:
+        return None
+    warnings = [
+        {
+            "source": "tushare.daily_pct",
+            "warning_type": "approximation",
+            "message": "本次涨跌停情绪由全市场日涨跌幅按交易板阈值近似计算，无法识别炸板、连板、封单和盘中触及后回落。",
+        }
+    ]
+    return _build_result(trade_date, "tushare.daily_pct", up, down, 0, 0, "partial", warnings)
+
+
 def _build_result(
     trade_date: str,
     source: str,
@@ -336,6 +366,17 @@ def _limit_step_from_text(text: str) -> int:
         return int(match.group(1))
     match = re.search(r"(\d+)\s*/\s*\d+", text)
     return int(match.group(1)) if match else 0
+
+
+def _limit_threshold(ts_code: str, name: str = "") -> float:
+    code = str(ts_code or "").split(".")[0]
+    if "ST" in name.upper() or "退" in name:
+        return 4.8
+    if code.startswith(("300", "301", "688", "689")):
+        return 19.5
+    if code.startswith(("8", "4", "920")):
+        return 29.0
+    return 9.5
 
 
 def _num(value: Any) -> float | None:

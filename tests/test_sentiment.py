@@ -76,6 +76,19 @@ class AllFailPro:
         raise PermissionError("stk_limit denied")
 
 
+class DailyPctFallbackPro(AllFailPro):
+    def daily(self, **kwargs):
+        return pd.DataFrame(
+            [
+                {"ts_code": "000001.SZ", "pct_chg": 10.0},
+                {"ts_code": "300001.SZ", "pct_chg": 20.0},
+                {"ts_code": "688001.SH", "pct_chg": -20.0},
+                {"ts_code": "600001.SH", "pct_chg": -9.9},
+                {"ts_code": "600002.SH", "pct_chg": 3.0},
+            ]
+        )
+
+
 class RetryLimitListDPro:
     def __init__(self):
         self.calls = 0
@@ -159,9 +172,23 @@ def test_all_sources_fail_returns_warning(monkeypatch, tmp_path):
     assert result["source"] == "market_sentiment_unavailable"
     assert result["data_quality"] == "warning"
     assert result["sentiment_score"] == 50
-    assert len(result["warnings"]) == 4
+    assert len(result["warnings"]) == 5
     assert result["warnings"][0]["source"] == "tushare.limit_list_d"
     assert result["warnings"][1]["source"] == "tushare.limit_list_ths"
+
+
+def test_daily_pct_fallback_estimates_limit_counts(monkeypatch, tmp_path):
+    monkeypatch.setattr(sentiment, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(sentiment, "_load_akshare", lambda: _empty_akshare_limit_pool())
+
+    result = fetch_market_sentiment(DailyPctFallbackPro(), "20260602")
+
+    assert result["source"] == "tushare.daily_pct"
+    assert result["up_limit_count"] == 2
+    assert result["down_limit_count"] == 2
+    assert result["limit_break_count"] == 0
+    assert result["data_quality"] == "partial"
+    assert "全市场日涨跌幅" in result["warnings"][-1]["message"]
 
 
 def test_market_sentiment_retries_rate_limited_source(monkeypatch, tmp_path):

@@ -221,6 +221,7 @@ class FakeDailyPro:
                     "high": 11.0,
                     "low": 9.5,
                     "close": 10.0,
+                    "pct_chg": 0.0,
                     "vol": 1000,
                     "amount": 10000,
                 },
@@ -231,6 +232,7 @@ class FakeDailyPro:
                     "high": 22.0,
                     "low": 19.0,
                     "close": 20.0,
+                    "pct_chg": 100.0,
                     "vol": 1100,
                     "amount": 22000,
                 },
@@ -291,8 +293,9 @@ def test_fetch_daily_bars_records_optional_interface_empty_returns():
     bars = provider.fetch_daily_bars("600519.SH", date(2026, 6, 1), date(2026, 6, 2))
 
     assert bars[0].qfq_close is None
-    assert bars[0].limit_up is None
-    assert provider.consume_data_gaps() == ["adj_factor_empty_or_unavailable", "stk_limit_empty_or_unavailable"]
+    assert bars[0].limit_up == 11.0
+    assert bars[0].limit_source == "daily.pct_chg_estimate"
+    assert provider.consume_data_gaps() == ["adj_factor_empty_or_unavailable"]
 
 
 class FailingOptionalDailyPro(FakeDailyPro):
@@ -311,11 +314,12 @@ def test_fetch_daily_bars_records_optional_interface_failures(monkeypatch):
     bars = provider.fetch_daily_bars("600519.SH", date(2026, 6, 1), date(2026, 6, 2))
 
     assert len(bars) == 2
+    assert bars[1].limit_up == 11.0
+    assert bars[1].limit_source == "daily.pct_chg_estimate"
     gaps = provider.consume_data_gaps()
     assert "adj_factor_permission_denied" in gaps
-    assert "stk_limit_rate_limited" in gaps
     assert "adj_factor_empty_or_unavailable" in gaps
-    assert "stk_limit_empty_or_unavailable" in gaps
+    assert not any(gap.startswith("stk_limit") for gap in gaps)
 
 
 class FakeFinancialPro:

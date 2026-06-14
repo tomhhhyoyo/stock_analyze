@@ -77,12 +77,20 @@ class TushareProvider:
         limit_by_date = self._fetch_stk_limit_map(symbol, start, end)
         basic_by_date = self._fetch_daily_basic_map(symbol, start, end)
         bars: list[DailyBar] = []
+        previous_close: float | None = None
+        estimated_limit_count = 0
         for row in df.to_dict("records"):
             trade_date = str(row["trade_date"])
             close = _num(row.get("close"))
             adj_factor = adj_by_date.get(trade_date)
             qfq_ratio = adj_factor / latest_adj if adj_factor is not None and latest_adj else None
             limit = limit_by_date.get(trade_date) or {}
+            limit_source = "tushare.stk_limit" if limit else None
+            if not limit:
+                limit = _estimate_limit_prices(symbol, row, previous_close)
+                if limit:
+                    limit_source = "daily.pct_chg_estimate"
+                    estimated_limit_count += 1
             basic = basic_by_date.get(trade_date) or {}
             bars.append(
                 DailyBar(
@@ -102,6 +110,7 @@ class TushareProvider:
                     limit_down=limit.get("limit_down"),
                     pct_to_limit_up=_pct_to_limit_up(close, limit.get("limit_up")),
                     pct_to_limit_down=_pct_to_limit_down(close, limit.get("limit_down")),
+                    limit_source=limit_source,
                     turnover_rate=basic.get("turnover_rate"),
                     turnover_rate_f=basic.get("turnover_rate_f"),
                     volume_ratio=basic.get("volume_ratio"),
@@ -109,6 +118,9 @@ class TushareProvider:
                     circ_mv=basic.get("circ_mv"),
                 )
             )
+            previous_close = close
+        if estimated_limit_count == len(bars):
+            self._data_gaps = [gap for gap in self._data_gaps if not gap.startswith("stk_limit")]
         if adj_by_date and len(adj_by_date) < len(bars):
             self._record_gap("adj_factor_partial_missing")
         if limit_by_date and len(limit_by_date) < len(bars):
@@ -769,6 +781,32 @@ def _qfq(value, ratio: float | None) -> float | None:
     if num is None or ratio is None:
         return None
     return round(num * ratio, 4)
+
+
+def _estimate_limit_prices(symbol: str, row: dict[str, Any], previous_close: float | None = None) -> dict[str, float | None]:
+    close = _num(row.get("close"))
+    pct_chg = _num(row.get("pct_chg"))
+    prev_close = previous_close
+    if close is not None and pct_chg is not None and pct_chg > -99.9:
+        prev_close = close / (1 + pct_chg / 100)
+    if prev_close is None or prev_close <= 0:
+        return {}
+    rate = _limit_rate(symbol, str(row.get("name") or row.get("名称") or ""))
+    return {
+        "limit_up": round(prev_close * (1 + rate), 4),
+        "limit_down": round(prev_close * (1 - rate), 4),
+    }
+
+
+def _limit_rate(symbol: str, name: str = "") -> float:
+    code = str(symbol or "").split(".")[0]
+    if "ST" in name.upper() or "退" in name:
+        return 0.05
+    if code.startswith(("300", "301", "688", "689")):
+        return 0.20
+    if code.startswith(("8", "4", "920")):
+        return 0.30
+    return 0.10
 
 
 def _pct_to_limit_up(close: float | None, limit_up: float | None) -> float | None:

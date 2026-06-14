@@ -89,6 +89,7 @@ class DailyBar:
     limit_down: float | None = None
     pct_to_limit_up: float | None = None
     pct_to_limit_down: float | None = None
+    limit_source: str | None = None
     turnover_rate: float | None = None
     turnover_rate_f: float | None = None
     volume_ratio: float | None = None
@@ -113,6 +114,7 @@ class DailyBar:
             "limit_down": self.limit_down,
             "pct_to_limit_up": self.pct_to_limit_up,
             "pct_to_limit_down": self.pct_to_limit_down,
+            "limit_source": self.limit_source,
             "turnover_rate": self.turnover_rate,
             "turnover_rate_f": self.turnover_rate_f,
             "volume_ratio": self.volume_ratio,
