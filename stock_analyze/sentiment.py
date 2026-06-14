@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -27,17 +29,60 @@ def fetch_market_sentiment(pro: Any, trade_date: str) -> dict[str, Any]:
 
 
 def _try_source(source: str, fetcher: Callable[[], dict[str, Any] | None], warnings: list[dict[str, Any]]) -> dict[str, Any] | None:
-    try:
-        return fetcher()
-    except Exception as exc:  # noqa: BLE001 - 外部数据源失败需要结构化降级
+    last_exc: Exception | None = None
+    for delay in _retry_schedule():
+        try:
+            return fetcher()
+        except Exception as exc:  # noqa: BLE001 - 外部数据源失败需要结构化降级
+            last_exc = exc
+            if not _is_retryable_error(exc) or delay is None:
+                break
+            if delay > 0:
+                time.sleep(delay)
+    if last_exc is not None:
         warnings.append(
             {
                 "source": source,
-                "exception_type": exc.__class__.__name__,
-                "exception_message": str(exc),
+                "exception_type": last_exc.__class__.__name__,
+                "exception_message": str(last_exc),
+                "retryable": _is_retryable_error(last_exc),
             }
         )
-        return None
+    return None
+
+
+def _retry_schedule() -> list[float | None]:
+    raw = os.environ.get("TUSHARE_RETRY_DELAYS", "1,3")
+    delays: list[float | None] = []
+    for item in raw.split(","):
+        value = item.strip()
+        if not value:
+            continue
+        try:
+            delays.append(float(value))
+        except ValueError:
+            continue
+    return delays + [None]
+
+
+def _is_retryable_error(exc: Exception) -> bool:
+    message = str(exc)
+    non_retry_markers = ["权限", "没有权限", "permission", "接口名"]
+    if any(marker in message for marker in non_retry_markers):
+        return False
+    retry_markers = [
+        "频率超限",
+        "每分钟最多访问",
+        "访问太频繁",
+        "Max retries exceeded",
+        "ConnectionError",
+        "ConnectTimeout",
+        "ReadTimeout",
+        "Timeout",
+        "temporarily unavailable",
+        "nodename nor servname provided",
+    ]
+    return any(marker in message for marker in retry_markers)
 
 
 def _from_limit_list_d(pro: Any, trade_date: str) -> dict[str, Any] | None:

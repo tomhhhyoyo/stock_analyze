@@ -68,6 +68,7 @@ def _build_raw_data(pack: dict[str, Any]) -> dict[str, Any]:
             "circ_market_cap": (pack.get("fundamental") or {}).get("circ_market_cap"),
         },
         "financials": pack.get("fundamental") or {},
+        "tushare_extensions": pack.get("tushare_extensions") or {},
         "announcements": pack.get("announcements") or [],
         "moneyflow": pack.get("moneyflow") or {},
         "market_context": pack.get("market_context") or {},

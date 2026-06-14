@@ -190,6 +190,74 @@ def test_pipeline_keeps_running_when_market_sentiment_warns(tmp_path: Path):
     assert scores["fundamental"] is not None
 
 
+def test_market_pack_records_extended_financial_and_limit_risks(tmp_path: Path):
+    bars = _bars()
+    bars[-1] = DailyBar(
+        date=bars[-1].date,
+        open=bars[-1].open,
+        high=bars[-1].high,
+        low=bars[-1].low,
+        close=10.0,
+        volume=bars[-1].volume,
+        amount=bars[-1].amount,
+        adj_factor=2.0,
+        qfq_open=9.8,
+        qfq_high=10.3,
+        qfq_low=9.7,
+        qfq_close=10.0,
+        limit_up=10.05,
+        limit_down=9.0,
+        pct_to_limit_up=0.5,
+        pct_to_limit_down=11.1111,
+    )
+    provider = StaticProvider(
+        bars,
+        {
+            "source": "static",
+            "financials": {
+                "source": "static",
+                "latest": {
+                    "report_end_date": "2026-03-31",
+                    "ann_date": "2026-04-20",
+                    "asset_liability_ratio": 0.76,
+                    "money_cap": 80,
+                    "accounts_receiv": 120,
+                    "inventories": 90,
+                    "goodwill": 130,
+                    "interest_bearing_debt": 120,
+                    "total_assets": 1000,
+                    "total_liab": 760,
+                    "operating_cashflow": 50,
+                    "investing_cashflow": -70,
+                    "financing_cashflow": 20,
+                    "free_cashflow": -30,
+                    "operating_cashflow_to_net_profit": 0.5,
+                },
+                "reserved": {"dividend": []},
+                "gaps": [],
+            },
+        },
+    )
+
+    result = run_analysis("/股票 分析 600519.SH，最近两年", tmp_path, provider)
+
+    pack = result["results"][0]["pack"]
+    assert pack["quote"]["qfq_close"] == 10.0
+    assert pack["quote"]["pct_to_limit_up"] == 0.5
+    assert pack["fundamental"]["asset_liability_ratio"] == 0.76
+    assert pack["fundamental"]["free_cashflow"] == -30
+    assert pack["data_audit"]["has_balancesheet"] is True
+    assert pack["data_audit"]["has_cashflow"] is True
+    assert pack["data_audit"]["has_stk_limit"] is True
+    assert pack["tushare_extensions"]["reserved"]["second_batch"]["dividend"] == []
+    assert "ASSET_LIABILITY_RATIO_HIGH" in pack["risk_flags"]
+    assert "INTEREST_BEARING_DEBT_ABOVE_CASH" in pack["risk_flags"]
+    assert "GOODWILL_RATIO_HIGH" in pack["risk_flags"]
+    assert "FREE_CASHFLOW_NEGATIVE" in pack["risk_flags"]
+    assert "CASHFLOW_TO_PROFIT_WEAK" in pack["risk_flags"]
+    assert "NEAR_LIMIT_UP" in pack["risk_flags"]
+
+
 def test_default_provider_requires_tushare_token(monkeypatch):
     monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
 

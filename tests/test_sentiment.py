@@ -67,6 +67,21 @@ class AllFailPro:
         raise PermissionError("stk_limit denied")
 
 
+class RetryLimitListDPro:
+    def __init__(self):
+        self.calls = 0
+
+    def limit_list_d(self, **kwargs):
+        self.calls += 1
+        if self.calls < 3:
+            raise RuntimeError("频率超限")
+        return pd.DataFrame(
+            [
+                {"trade_date": "20260602", "ts_code": "000001.SZ", "name": "A", "limit": "U", "limit_times": 1},
+            ]
+        )
+
+
 def test_limit_list_d_success(monkeypatch, tmp_path):
     monkeypatch.setattr(sentiment, "CACHE_DIR", tmp_path)
 
@@ -119,3 +134,15 @@ def test_all_sources_fail_returns_warning(monkeypatch, tmp_path):
     assert len(result["warnings"]) == 4
     assert result["warnings"][0]["source"] == "tushare.limit_list_d"
     assert result["warnings"][1]["source"] == "tushare.limit_list_ths"
+
+
+def test_market_sentiment_retries_rate_limited_source(monkeypatch, tmp_path):
+    monkeypatch.setattr(sentiment, "CACHE_DIR", tmp_path)
+    monkeypatch.setenv("TUSHARE_RETRY_DELAYS", "0,0")
+    pro = RetryLimitListDPro()
+
+    result = fetch_market_sentiment(pro, "20260602")
+
+    assert pro.calls == 3
+    assert result["source"] == "tushare.limit_list_d"
+    assert result["up_limit_count"] == 1

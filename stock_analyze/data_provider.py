@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Callable, Protocol
@@ -35,6 +36,9 @@ class MarketDataProvider(Protocol):
     def fetch_market_context(self, trade_date: str | None = None, symbol: str | None = None) -> dict:
         ...
 
+    def consume_data_gaps(self) -> list[str]:
+        ...
+
 
 class TushareProvider:
     def __init__(self, token: str | None = None) -> None:
@@ -44,6 +48,7 @@ class TushareProvider:
         import tushare as ts
 
         self.pro = ts.pro_api(self.token)
+        self._data_gaps: list[str] = []
 
     def fetch_stock_list(self) -> list[dict]:
         df = self.pro.stock_basic(
@@ -56,28 +61,92 @@ class TushareProvider:
         return df.to_dict("records")
 
     def fetch_daily_bars(self, symbol: str, start_date: date, end_date: date) -> list[DailyBar]:
+        self._data_gaps = []
+        start = start_date.strftime("%Y%m%d")
+        end = end_date.strftime("%Y%m%d")
         df = self.pro.daily(
             ts_code=symbol,
-            start_date=start_date.strftime("%Y%m%d"),
-            end_date=end_date.strftime("%Y%m%d"),
+            start_date=start,
+            end_date=end,
         )
         if df is None or df.empty:
             raise RuntimeError(f"Tushare 未返回日线数据：{symbol}")
         df = df.sort_values("trade_date")
+        adj_by_date = self._fetch_adj_factor_map(symbol, start, end)
+        latest_adj = _latest_adj_factor(adj_by_date)
+        limit_by_date = self._fetch_stk_limit_map(symbol, start, end)
         bars: list[DailyBar] = []
         for row in df.to_dict("records"):
+            trade_date = str(row["trade_date"])
+            close = _num(row.get("close"))
+            adj_factor = adj_by_date.get(trade_date)
+            qfq_ratio = adj_factor / latest_adj if adj_factor is not None and latest_adj else None
+            limit = limit_by_date.get(trade_date) or {}
             bars.append(
                 DailyBar(
-                    date=_fmt_trade_date(str(row["trade_date"])),
+                    date=_fmt_trade_date(trade_date),
                     open=float(row["open"]),
                     high=float(row["high"]),
                     low=float(row["low"]),
                     close=float(row["close"]),
                     volume=float(row.get("vol") or 0),
                     amount=float(row.get("amount") or 0),
+                    adj_factor=adj_factor,
+                    qfq_open=_qfq(row.get("open"), qfq_ratio),
+                    qfq_high=_qfq(row.get("high"), qfq_ratio),
+                    qfq_low=_qfq(row.get("low"), qfq_ratio),
+                    qfq_close=_qfq(row.get("close"), qfq_ratio),
+                    limit_up=limit.get("limit_up"),
+                    limit_down=limit.get("limit_down"),
+                    pct_to_limit_up=_pct_to_limit_up(close, limit.get("limit_up")),
+                    pct_to_limit_down=_pct_to_limit_down(close, limit.get("limit_down")),
                 )
             )
+        if adj_by_date and len(adj_by_date) < len(bars):
+            self._record_gap("adj_factor_partial_missing")
+        if limit_by_date and len(limit_by_date) < len(bars):
+            self._record_gap("stk_limit_partial_missing")
         return bars
+
+    def _fetch_adj_factor_map(self, symbol: str, start: str, end: str) -> dict[str, float]:
+        df = _safe_df(
+            lambda: self.pro.adj_factor(ts_code=symbol, start_date=start, end_date=end, fields="ts_code,trade_date,adj_factor"),
+            "adj_factor",
+            self._data_gaps,
+        )
+        if df is None or df.empty:
+            self._record_gap("adj_factor_empty_or_unavailable")
+            return {}
+        result: dict[str, float] = {}
+        for row in df.to_dict("records"):
+            value = _num(row.get("adj_factor"))
+            if value is not None:
+                result[str(row.get("trade_date"))] = value
+        if not result:
+            self._record_gap("adj_factor_empty_or_unavailable")
+        return result
+
+    def _fetch_stk_limit_map(self, symbol: str, start: str, end: str) -> dict[str, dict[str, float | None]]:
+        df = _safe_df(
+            lambda: self.pro.stk_limit(
+                ts_code=symbol,
+                start_date=start,
+                end_date=end,
+                fields="ts_code,trade_date,up_limit,down_limit",
+            ),
+            "stk_limit",
+            self._data_gaps,
+        )
+        if df is None or df.empty:
+            self._record_gap("stk_limit_empty_or_unavailable")
+            return {}
+        result: dict[str, dict[str, float | None]] = {}
+        for row in df.to_dict("records"):
+            result[str(row.get("trade_date"))] = {
+                "limit_up": _num(row.get("up_limit")),
+                "limit_down": _num(row.get("down_limit")),
+            }
+        return result
 
     def fetch_basic(self, symbol: str, trade_date: str | None = None) -> dict:
         fields = "ts_code,trade_date,total_mv,circ_mv,pe_ttm,pb"
@@ -86,6 +155,7 @@ class TushareProvider:
             kwargs["trade_date"] = trade_date.replace("-", "")
         df = self.pro.daily_basic(**kwargs)
         if df is None or df.empty:
+            self._record_gap("daily_basic_empty_or_unavailable")
             return {}
         row = df.sort_values("trade_date").iloc[-1].to_dict()
         return {
@@ -121,7 +191,34 @@ class TushareProvider:
             "income",
             result["gaps"],
         )
+        balance = _safe_df(
+            lambda: self.pro.balancesheet(
+                ts_code=symbol,
+                start_date=start,
+                end_date=end,
+                fields=(
+                    "ts_code,ann_date,end_date,total_assets,total_liab,money_cap,accounts_receiv,"
+                    "inventories,goodwill,st_borr,lt_borr,bond_payable,non_cur_liab_due_1y"
+                ),
+            ),
+            "balancesheet",
+            result["gaps"],
+        )
+        cashflow = _safe_df(
+            lambda: self.pro.cashflow(
+                ts_code=symbol,
+                start_date=start,
+                end_date=end,
+                fields=(
+                    "ts_code,ann_date,end_date,n_cashflow_act,n_cashflow_inv_act,n_cash_flows_fnc_act,"
+                    "c_pay_acq_const_fiolta"
+                ),
+            ),
+            "cashflow",
+            result["gaps"],
+        )
         latest: dict[str, Any] = {}
+        net_profit_parent = None
         if fina is not None and not fina.empty:
             row = fina.sort_values(["end_date", "ann_date"]).iloc[-1].to_dict()
             latest.update(
@@ -144,11 +241,61 @@ class TushareProvider:
                     "total_profit": _num(row.get("total_profit")),
                 }
             )
+            net_profit_parent = latest.get("net_profit_parent")
+        if balance is not None and not balance.empty:
+            row = balance.sort_values(["end_date", "ann_date"]).iloc[-1].to_dict()
+            total_assets = _num(row.get("total_assets"))
+            total_liab = _num(row.get("total_liab"))
+            interest_debt = _sum_nums(
+                row.get("st_borr"), row.get("lt_borr"), row.get("bond_payable"), row.get("non_cur_liab_due_1y")
+            )
+            latest.update(
+                {
+                    "asset_liability_ratio": _ratio(total_liab, total_assets),
+                    "money_cap": _num(row.get("money_cap")),
+                    "accounts_receiv": _num(row.get("accounts_receiv")),
+                    "inventories": _num(row.get("inventories")),
+                    "goodwill": _num(row.get("goodwill")),
+                    "interest_bearing_debt": interest_debt,
+                    "total_assets": total_assets,
+                    "total_liab": total_liab,
+                }
+            )
+        else:
+            result["gaps"].append("balancesheet_empty_or_unavailable")
+        if cashflow is not None and not cashflow.empty:
+            row = cashflow.sort_values(["end_date", "ann_date"]).iloc[-1].to_dict()
+            operating_cashflow = _num(row.get("n_cashflow_act"))
+            capex = _num(row.get("c_pay_acq_const_fiolta"))
+            latest.update(
+                {
+                    "operating_cashflow": operating_cashflow,
+                    "investing_cashflow": _num(row.get("n_cashflow_inv_act")),
+                    "financing_cashflow": _num(row.get("n_cash_flows_fnc_act")),
+                    "capex": capex,
+                    "free_cashflow": _subtract(operating_cashflow, capex),
+                    "operating_cashflow_to_net_profit": _ratio(operating_cashflow, net_profit_parent),
+                }
+            )
+        else:
+            result["gaps"].append("cashflow_empty_or_unavailable")
+        result["reserved"] = _empty_tushare_reserved()
         result["latest"] = latest
         return result
 
+    def consume_data_gaps(self) -> list[str]:
+        gaps = sorted(set(getattr(self, "_data_gaps", [])))
+        self._data_gaps = []
+        return gaps
+
+    def _record_gap(self, gap: str) -> None:
+        if not hasattr(self, "_data_gaps"):
+            self._data_gaps = []
+        self._data_gaps.append(gap)
+
     def fetch_announcements(self, symbol: str, start_date: date, end_date: date) -> list[dict]:
         rows: list[dict] = []
+        gaps: list[str] = []
         df = _safe_df(
             lambda: self.pro.anns_d(
                 ts_code=symbol,
@@ -157,18 +304,61 @@ class TushareProvider:
                 fields="ts_code,ann_date,name,title,url",
             ),
             "anns_d",
-            [],
+            gaps,
+        )
+        if df is not None and not df.empty:
+            for row in df.sort_values("ann_date", ascending=False).head(10).to_dict("records"):
+                rows.append(
+                    {
+                        "date": _fmt_trade_date(str(row.get("ann_date", ""))),
+                        "title": row.get("title"),
+                        "type": "公告",
+                        "url": row.get("url"),
+                        "source": "tushare.anns_d",
+                    }
+                )
+        if rows:
+            return rows
+        fallback = self._fetch_disclosure_events(symbol, start_date, end_date)
+        if fallback:
+            return fallback
+        self._data_gaps.extend(gaps)
+        return rows
+
+    def _fetch_disclosure_events(self, symbol: str, start_date: date, end_date: date) -> list[dict]:
+        gaps: list[str] = []
+        df = _safe_df(
+            lambda: self.pro.disclosure_date(
+                ts_code=symbol,
+                fields="ts_code,ann_date,end_date,pre_date,actual_date,modify_date",
+            ),
+            "disclosure_date",
+            gaps,
         )
         if df is None or df.empty:
-            return rows
-        for row in df.sort_values("ann_date", ascending=False).head(10).to_dict("records"):
+            self._data_gaps.extend(gaps)
+            return []
+        rows: list[dict] = []
+        start = start_date.strftime("%Y%m%d")
+        end = end_date.strftime("%Y%m%d")
+        records = []
+        for row in df.to_dict("records"):
+            ann_date = str(row.get("ann_date") or row.get("actual_date") or row.get("pre_date") or row.get("end_date") or "")
+            if not ann_date or start <= ann_date <= end:
+                records.append(row)
+        if not records:
+            records = df.to_dict("records")
+        for row in sorted(records, key=lambda item: (str(item.get("ann_date") or ""), str(item.get("end_date") or "")), reverse=True)[:10]:
+            ann_date = row.get("ann_date") or row.get("actual_date") or row.get("pre_date") or row.get("end_date")
+            report_end = _fmt_trade_date(str(row.get("end_date", "")))
             rows.append(
                 {
-                    "date": _fmt_trade_date(str(row.get("ann_date", ""))),
-                    "title": row.get("title"),
-                    "type": "公告",
-                    "url": row.get("url"),
-                    "source": "tushare.anns_d",
+                    "date": _fmt_trade_date(str(ann_date)),
+                    "title": f"{report_end} 财报披露日期记录",
+                    "type": "财报披露",
+                    "url": None,
+                    "source": "tushare.disclosure_date",
+                    "data_quality": "fallback",
                 }
             )
         return rows
@@ -250,6 +440,7 @@ class TushareProvider:
         cached = _read_cache(cache_key)
         if cached:
             return cached
+        primary_gaps: list[str] = []
         df = _safe_df(
             lambda: self.pro.sw_daily(
                 ts_code=mapping["ts_code"],
@@ -257,8 +448,36 @@ class TushareProvider:
                 fields="ts_code,name,trade_date,close,pct_change",
             ),
             f"sw_daily:{mapping['ts_code']}",
-            gaps,
+            primary_gaps,
         )
+        source = "tushare.sw_daily"
+        pct_col = "pct_change"
+        if df is None or df.empty:
+            fallback_gaps: list[str] = []
+            df = _safe_df(
+                lambda: self.pro.index_daily(
+                    ts_code=mapping["ts_code"],
+                    trade_date=trade_date,
+                    fields="ts_code,trade_date,close,pct_chg",
+                ),
+                f"index_daily_industry:{mapping['ts_code']}",
+                fallback_gaps,
+            )
+            source = "tushare.index_daily"
+            pct_col = "pct_chg"
+            if df is None or df.empty:
+                cached_latest = _read_latest_cache_prefix(f"industry_{mapping['ts_code']}_")
+                if cached_latest:
+                    cached_latest["data_quality"] = "cached_stale"
+                    cached_latest["note"] = "本次行业指数接口不可用，已使用本地历史缓存。"
+                    return cached_latest
+                gaps.extend(primary_gaps + fallback_gaps)
+                return {
+                    "status": "failed",
+                    "ts_code": mapping["ts_code"],
+                    "name": mapping.get("name"),
+                    "note": "行业指数接口未返回数据，已记录到数据缺口。",
+                }
         if df is None or df.empty:
             return {
                 "status": "failed",
@@ -273,8 +492,8 @@ class TushareProvider:
             "name": row.get("name") or mapping.get("name"),
             "trade_date": _fmt_trade_date(str(row.get("trade_date", ""))),
             "close": _num(row.get("close")),
-            "pct_chg": _num(row.get("pct_change")),
-            "source": "tushare.sw_daily",
+            "pct_chg": _num(row.get(pct_col)),
+            "source": source,
             "mapping_source": mapping.get("source"),
         }
         _write_cache(cache_key, result)
@@ -352,6 +571,9 @@ class StaticProvider:
             }
         )
 
+    def consume_data_gaps(self) -> list[str]:
+        return list(self.basic.get("data_gaps") or [])
+
 
 def default_provider() -> MarketDataProvider:
     return TushareProvider()
@@ -376,12 +598,126 @@ def _num(value):
         return None
 
 
+def _latest_adj_factor(adj_by_date: dict[str, float]) -> float | None:
+    if not adj_by_date:
+        return None
+    latest_date = sorted(adj_by_date)[-1]
+    return adj_by_date.get(latest_date)
+
+
+def _qfq(value, ratio: float | None) -> float | None:
+    num = _num(value)
+    if num is None or ratio is None:
+        return None
+    return round(num * ratio, 4)
+
+
+def _pct_to_limit_up(close: float | None, limit_up: float | None) -> float | None:
+    if close is None or limit_up is None or close <= 0:
+        return None
+    return round((limit_up / close - 1) * 100, 4)
+
+
+def _pct_to_limit_down(close: float | None, limit_down: float | None) -> float | None:
+    if close is None or limit_down is None or limit_down <= 0:
+        return None
+    return round((close / limit_down - 1) * 100, 4)
+
+
+def _sum_nums(*values) -> float | None:
+    nums = [_num(value) for value in values]
+    present = [value for value in nums if value is not None]
+    if not present:
+        return None
+    return round(sum(present), 4)
+
+
+def _subtract(left: float | None, right: float | None) -> float | None:
+    if left is None or right is None:
+        return None
+    return round(left - right, 4)
+
+
+def _ratio(numerator: float | None, denominator: float | None) -> float | None:
+    if numerator is None or denominator in (None, 0):
+        return None
+    return round(numerator / denominator, 4)
+
+
+def _empty_tushare_reserved() -> dict[str, list[dict]]:
+    return {
+        "fina_mainbz": [],
+        "forecast": [],
+        "express": [],
+        "dividend": [],
+        "disclosure_date": [],
+        "top_list": [],
+        "top_inst": [],
+        "margin": [],
+        "margin_detail": [],
+        "moneyflow_hsgt": [],
+        "hsgt_top10": [],
+        "index_dailybasic": [],
+        "index_classify": [],
+        "index_member": [],
+        "concept": [],
+        "concept_detail": [],
+    }
+
+
 def _safe_df(call: Callable[[], Any], label: str, gaps: list[str]):
+    last_exc: Exception | None = None
+    for delay in _retry_schedule():
+        try:
+            return call()
+        except Exception as exc:  # noqa: BLE001 - 外部数据源失败必须降级为审计缺口
+            last_exc = exc
+            if not _is_retryable_error(exc) or delay is None:
+                break
+            if delay > 0:
+                time.sleep(delay)
+    if last_exc is not None:
+        gaps.append(_gap_code(label, last_exc))
+        return None
     try:
         return call()
     except Exception as exc:  # noqa: BLE001 - 外部数据源失败必须降级为审计缺口
         gaps.append(_gap_code(label, exc))
         return None
+
+
+def _retry_schedule() -> list[float | None]:
+    raw = os.environ.get("TUSHARE_RETRY_DELAYS", "1,3")
+    delays: list[float | None] = []
+    for item in raw.split(","):
+        value = item.strip()
+        if not value:
+            continue
+        try:
+            delays.append(float(value))
+        except ValueError:
+            continue
+    return delays + [None]
+
+
+def _is_retryable_error(exc: Exception) -> bool:
+    message = str(exc)
+    retry_markers = [
+        "频率超限",
+        "每分钟最多访问",
+        "访问太频繁",
+        "Max retries exceeded",
+        "ConnectionError",
+        "ConnectTimeout",
+        "ReadTimeout",
+        "Timeout",
+        "temporarily unavailable",
+        "nodename nor servname provided",
+    ]
+    non_retry_markers = ["权限", "没有权限", "permission", "接口名"]
+    if any(marker in message for marker in non_retry_markers):
+        return False
+    return any(marker in message for marker in retry_markers)
 
 
 def _gap_code(label: str, exc: Exception) -> str:
@@ -424,6 +760,21 @@ def _read_cache(key: str) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError):
         return None
     return data if isinstance(data, dict) else None
+
+
+def _read_latest_cache_prefix(prefix: str) -> dict[str, Any] | None:
+    cache_prefix = _cache_path(prefix).name.removesuffix(".json")
+    if not CACHE_DIR.exists():
+        return None
+    paths = sorted(CACHE_DIR.glob(f"{cache_prefix}*.json"), reverse=True)
+    for path in paths:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(data, dict):
+            return data
+    return None
 
 
 def _write_cache(key: str, data: dict[str, Any]) -> None:

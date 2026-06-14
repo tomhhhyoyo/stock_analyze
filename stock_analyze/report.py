@@ -13,6 +13,16 @@ RISK_FLAG_DESCRIPTIONS = {
     "MONEYFLOW_5D_NEGATIVE": "近5日资金净流出，资金面偏弱",
     "MARKET_SENTIMENT_WEAK": "跌停样本多于涨停样本，市场情绪偏弱",
     "ANNOUNCEMENT_EVENT_RISK": "近期公告存在中高风险事件，需复核公告原文",
+    "ASSET_LIABILITY_RATIO_HIGH": "资产负债率偏高，偿债压力需要复核",
+    "INTEREST_BEARING_DEBT_ABOVE_CASH": "有息负债高于货币资金，债务覆盖需要复核",
+    "GOODWILL_RATIO_HIGH": "商誉占资产比例偏高，需关注减值风险",
+    "OPERATING_CASHFLOW_NEGATIVE": "经营现金流为负，现金创造能力偏弱",
+    "FREE_CASHFLOW_NEGATIVE": "自由现金流为负，资本开支后现金流承压",
+    "CASHFLOW_TO_PROFIT_WEAK": "经营现金流对归母净利润覆盖不足",
+    "AT_LIMIT_UP": "收盘价接近或达到涨停价，短期波动可能放大",
+    "NEAR_LIMIT_UP": "收盘价距涨停价较近，需关注追高波动",
+    "AT_LIMIT_DOWN": "收盘价接近或达到跌停价，流动性和情绪风险较高",
+    "NEAR_LIMIT_DOWN": "收盘价距跌停价较近，需关注下行波动",
 }
 
 DATA_GAP_DESCRIPTIONS = {
@@ -63,6 +73,10 @@ def render_report(pack: dict[str, Any], scorecard: dict[str, Any], position: dic
 - **PB**：{pack.get("fundamental", {}).get("pb")}
 - **营收同比**：{pack.get("fundamental", {}).get("revenue_growth_yoy")}%
 - **归母净利润同比**：{pack.get("fundamental", {}).get("net_profit_growth_yoy")}%
+- **资产负债率**：{pack.get("fundamental", {}).get("asset_liability_ratio")}
+- **自由现金流**：{pack.get("fundamental", {}).get("free_cashflow")}
+- **净现比**：{pack.get("fundamental", {}).get("operating_cashflow_to_net_profit")}
+- **距涨停/跌停**：{quote.get("pct_to_limit_up")}% / {quote.get("pct_to_limit_down")}%
 - **5日资金净流入**：{(pack.get("moneyflow") or {}).get("latest", {}).get("net_amount_5d")}
 
 ## 技术面分析
@@ -79,6 +93,7 @@ def render_report(pack: dict[str, Any], scorecard: dict[str, Any], position: dic
 ## 基本面与估值
 
 - **财报摘要**：{_financial_text(pack)}
+- **资产负债与现金流**：{_balance_cashflow_text(pack)}
 - **估值评分**：{scores["valuation"]}/100
 - **估值字段**：PE TTM={pack.get("fundamental", {}).get("pe_ttm")}，PB={pack.get("fundamental", {}).get("pb")}
 - **说明**：若估值字段为空，表示当前数据源未返回该字段，不能用模型记忆补齐。
@@ -94,6 +109,8 @@ def render_report(pack: dict[str, Any], scorecard: dict[str, Any], position: dic
 ## 市场情绪与涨跌停结构
 
 {_market_sentiment_lines(pack)}
+
+{_limit_lines(pack)}
 
 ## 公告与事件风险
 
@@ -328,6 +345,30 @@ def _financial_text(pack: dict[str, Any]) -> str:
     )
 
 
+def _balance_cashflow_text(pack: dict[str, Any]) -> str:
+    f = pack.get("fundamental") or {}
+    keys = [
+        "asset_liability_ratio",
+        "money_cap",
+        "accounts_receiv",
+        "inventories",
+        "goodwill",
+        "interest_bearing_debt",
+        "operating_cashflow",
+        "free_cashflow",
+        "operating_cashflow_to_net_profit",
+    ]
+    if not any(f.get(key) is not None for key in keys):
+        return "资产负债表或现金流量表扩展字段缺失，已记录到数据缺口。"
+    return (
+        f"资产负债率={f.get('asset_liability_ratio')}，货币资金={f.get('money_cap')}，"
+        f"应收账款={f.get('accounts_receiv')}，存货={f.get('inventories')}，商誉={f.get('goodwill')}，"
+        f"有息负债={f.get('interest_bearing_debt')}；经营现金流={f.get('operating_cashflow')}，"
+        f"投资现金流={f.get('investing_cashflow')}，筹资现金流={f.get('financing_cashflow')}，"
+        f"自由现金流={f.get('free_cashflow')}，净现比={f.get('operating_cashflow_to_net_profit')}。"
+    )
+
+
 def _moneyflow_lines(pack: dict[str, Any]) -> str:
     moneyflow = pack.get("moneyflow") or {}
     latest = moneyflow.get("latest") or {}
@@ -394,6 +435,18 @@ def _market_sentiment_lines(pack: dict[str, Any]) -> str:
         if message:
             lines.append(f"- **局限**：{message}")
     return "\n".join(lines)
+
+
+def _limit_lines(pack: dict[str, Any]) -> str:
+    quote = pack.get("quote") or {}
+    if quote.get("limit_up") is None and quote.get("limit_down") is None:
+        return "- **个股涨跌停价**：`stk_limit` 未返回可用数据，已记录到数据缺口。"
+    return "\n".join(
+        [
+            f"- **个股涨停价**：{quote.get('limit_up')}，距涨停 {quote.get('pct_to_limit_up')}%",
+            f"- **个股跌停价**：{quote.get('limit_down')}，距跌停 {quote.get('pct_to_limit_down')}%",
+        ]
+    )
 
 
 def _announcement_lines(pack: dict[str, Any]) -> str:

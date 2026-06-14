@@ -80,6 +80,15 @@ class DailyBar:
     close: float
     volume: float
     amount: float | None = None
+    adj_factor: float | None = None
+    qfq_open: float | None = None
+    qfq_high: float | None = None
+    qfq_low: float | None = None
+    qfq_close: float | None = None
+    limit_up: float | None = None
+    limit_down: float | None = None
+    pct_to_limit_up: float | None = None
+    pct_to_limit_down: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -90,4 +99,13 @@ class DailyBar:
             "close": self.close,
             "volume": self.volume,
             "amount": self.amount,
+            "adj_factor": self.adj_factor,
+            "qfq_open": self.qfq_open,
+            "qfq_high": self.qfq_high,
+            "qfq_low": self.qfq_low,
+            "qfq_close": self.qfq_close,
+            "limit_up": self.limit_up,
+            "limit_down": self.limit_down,
+            "pct_to_limit_up": self.pct_to_limit_up,
+            "pct_to_limit_down": self.pct_to_limit_down,
         }

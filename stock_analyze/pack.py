@@ -9,14 +9,29 @@ from .indicators import atr, bollinger, macd, max_drawdown, moving_average, pct_
 from .models import AnalysisRequest
 from .symbols import lookup_name_by_symbol
 
+SECOND_BATCH_RESERVED = ("fina_mainbz", "forecast", "express", "dividend", "disclosure_date")
+THIRD_BATCH_RESERVED = (
+    "top_list",
+    "top_inst",
+    "margin",
+    "margin_detail",
+    "moneyflow_hsgt",
+    "hsgt_top10",
+    "index_dailybasic",
+    "index_classify",
+    "index_member",
+    "concept",
+    "concept_detail",
+)
+
 
 def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDataProvider) -> dict[str, Any]:
     bars = provider.fetch_daily_bars(symbol, request.period.start_date, request.period.end_date)
     if len(bars) < 20:
         raise RuntimeError(f"{symbol} 可用日线少于 20 根，停止数值分析。")
-    closes = [bar.close for bar in bars]
-    highs = [bar.high for bar in bars]
-    lows = [bar.low for bar in bars]
+    closes = [bar.qfq_close if bar.qfq_close is not None else bar.close for bar in bars]
+    highs = [bar.qfq_high if bar.qfq_high is not None else bar.high for bar in bars]
+    lows = [bar.qfq_low if bar.qfq_low is not None else bar.low for bar in bars]
     volumes = [bar.volume for bar in bars]
     last = bars[-1]
     basic = provider.fetch_basic(symbol, last.date)
@@ -25,7 +40,8 @@ def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDat
     moneyflow = provider.fetch_moneyflow(symbol, request.period.start_date, request.period.end_date)
     market_context = provider.fetch_market_context(last.date, symbol)
     market_sentiment = market_context.get("sentiment") or {}
-    data_gaps = _collect_data_gaps(financials, moneyflow, market_context, announcements)
+    provider_gaps = provider.consume_data_gaps() if hasattr(provider, "consume_data_gaps") else []
+    data_gaps = _collect_data_gaps(financials, moneyflow, market_context, announcements, provider_gaps)
     indicators = {
         "ma5": moving_average(closes, 5),
         "ma10": moving_average(closes, 10),
@@ -62,10 +78,21 @@ def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDat
         "close": last.close,
         "volume": last.volume,
         "amount": last.amount,
+        "adj_factor": last.adj_factor,
+        "qfq_open": last.qfq_open,
+        "qfq_high": last.qfq_high,
+        "qfq_low": last.qfq_low,
+        "qfq_close": last.qfq_close,
+        "limit_up": last.limit_up,
+        "limit_down": last.limit_down,
+        "pct_to_limit_up": last.pct_to_limit_up,
+        "pct_to_limit_down": last.pct_to_limit_down,
     }
+    fundamental = _build_fundamental(basic, financials)
+    tushare_extensions = _build_tushare_extensions(financials)
     return {
         "meta": {
-            "contract_version": "1.1.0",
+            "contract_version": "1.2.0",
             "symbol": symbol,
             "name": lookup_name_by_symbol(symbol),
             "market": "A-share",
@@ -93,41 +120,79 @@ def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDat
         "quote": quote,
         "daily_bars": [bar.to_dict() for bar in bars],
         "indicators": indicators,
-        "fundamental": {
-            "pe_ttm": basic.get("pe_ttm"),
-            "pb": basic.get("pb"),
-            "market_cap": basic.get("market_cap"),
-            "circ_market_cap": basic.get("circ_market_cap"),
-            "roe": financials.get("latest", {}).get("roe") or basic.get("roe"),
-            "roe_dt": financials.get("latest", {}).get("roe_dt"),
-            "revenue": financials.get("latest", {}).get("revenue"),
-            "net_profit_parent": financials.get("latest", {}).get("net_profit_parent"),
-            "revenue_growth_yoy": financials.get("latest", {}).get("revenue_growth_yoy") or basic.get("revenue_growth_yoy"),
-            "net_profit_growth_yoy": financials.get("latest", {}).get("net_profit_growth_yoy")
-            or basic.get("net_profit_growth_yoy"),
-            "gross_margin": financials.get("latest", {}).get("gross_margin"),
-            "report_end_date": financials.get("latest", {}).get("report_end_date"),
-            "ann_date": financials.get("latest", {}).get("ann_date"),
-            "source": financials.get("source") or basic.get("source"),
-        },
+        "fundamental": fundamental,
+        "tushare_extensions": tushare_extensions,
         "announcements": announcements,
         "moneyflow": moneyflow,
         "market_context": market_context,
         "market_sentiment": market_sentiment,
         "data_gaps": data_gaps,
-        "risk_flags": _risk_flags(basic, indicators, financials, moneyflow, market_context, announcements),
+        "risk_flags": _risk_flags(basic, indicators, financials, moneyflow, market_context, announcements, last),
         "data_audit": _build_data_audit(
-            bars, indicators, financials, moneyflow, market_context, market_sentiment, announcements, data_gaps
+            bars, indicators, financials, moneyflow, market_context, market_sentiment, announcements, data_gaps, tushare_extensions
         ),
         "trace": {
             "quote.close": "daily_bars[-1].close",
-            "indicators.ma20": "computed from daily_bars.close[-20:]",
-            "indicators.ma60": "computed from daily_bars.close[-60:]",
+            "quote.qfq_close": "daily_bars[-1].qfq_close, computed from daily + adj_factor",
+            "indicators.ma20": "computed from daily_bars.qfq_close[-20:] with raw close fallback",
+            "indicators.ma60": "computed from daily_bars.qfq_close[-60:] with raw close fallback",
             "indicators.vol_ratio_5_20": "vol_ma5 / vol_ma20",
             "fundamental": "provider.fetch_financials + provider.fetch_basic",
+            "fundamental.balance_sheet": "provider.fetch_financials.balancesheet",
+            "fundamental.cashflow": "provider.fetch_financials.cashflow",
+            "quote.limit_up/down": "provider.fetch_daily_bars.stk_limit",
             "announcements": "provider.fetch_announcements",
             "moneyflow": "provider.fetch_moneyflow",
             "market_context": "provider.fetch_market_context",
+        },
+    }
+
+
+def _build_fundamental(basic: dict[str, Any], financials: dict[str, Any]) -> dict[str, Any]:
+    latest = financials.get("latest") or {}
+    return {
+        "pe_ttm": basic.get("pe_ttm"),
+        "pb": basic.get("pb"),
+        "market_cap": basic.get("market_cap"),
+        "circ_market_cap": basic.get("circ_market_cap"),
+        "roe": latest.get("roe") or basic.get("roe"),
+        "roe_dt": latest.get("roe_dt"),
+        "revenue": latest.get("revenue"),
+        "net_profit_parent": latest.get("net_profit_parent"),
+        "revenue_growth_yoy": latest.get("revenue_growth_yoy") or basic.get("revenue_growth_yoy"),
+        "net_profit_growth_yoy": latest.get("net_profit_growth_yoy") or basic.get("net_profit_growth_yoy"),
+        "gross_margin": latest.get("gross_margin"),
+        "asset_liability_ratio": latest.get("asset_liability_ratio"),
+        "money_cap": latest.get("money_cap"),
+        "accounts_receiv": latest.get("accounts_receiv"),
+        "inventories": latest.get("inventories"),
+        "goodwill": latest.get("goodwill"),
+        "interest_bearing_debt": latest.get("interest_bearing_debt"),
+        "total_assets": latest.get("total_assets"),
+        "total_liab": latest.get("total_liab"),
+        "operating_cashflow": latest.get("operating_cashflow"),
+        "investing_cashflow": latest.get("investing_cashflow"),
+        "financing_cashflow": latest.get("financing_cashflow"),
+        "free_cashflow": latest.get("free_cashflow"),
+        "operating_cashflow_to_net_profit": latest.get("operating_cashflow_to_net_profit"),
+        "report_end_date": latest.get("report_end_date"),
+        "ann_date": latest.get("ann_date"),
+        "source": financials.get("source") or basic.get("source"),
+    }
+
+
+def _build_tushare_extensions(financials: dict[str, Any]) -> dict[str, Any]:
+    reserved = financials.get("reserved") or {}
+    return {
+        "implemented": {
+            "adj_factor": "daily_bars.qfq_*",
+            "balancesheet": "fundamental.balance_sheet fields",
+            "cashflow": "fundamental.cashflow fields",
+            "stk_limit": "quote.limit_* and daily_bars.limit_*",
+        },
+        "reserved": {
+            "second_batch": {key: list(reserved.get(key) or []) for key in SECOND_BATCH_RESERVED},
+            "third_batch": {key: list(reserved.get(key) or []) for key in THIRD_BATCH_RESERVED},
         },
     }
 
@@ -139,6 +204,7 @@ def _risk_flags(
     moneyflow: dict[str, Any],
     market_context: dict[str, Any],
     announcements: list[dict[str, Any]],
+    last_bar: Any,
 ) -> list[str]:
     flags: list[str] = []
     pe = basic.get("pe_ttm")
@@ -156,6 +222,19 @@ def _risk_flags(
         flags.append("NET_PROFIT_GROWTH_NEGATIVE")
     if fin.get("revenue_growth_yoy") is not None and fin["revenue_growth_yoy"] < 0:
         flags.append("REVENUE_GROWTH_NEGATIVE")
+    if fin.get("asset_liability_ratio") is not None and fin["asset_liability_ratio"] >= 0.7:
+        flags.append("ASSET_LIABILITY_RATIO_HIGH")
+    if fin.get("interest_bearing_debt") is not None and fin.get("money_cap") is not None and fin["interest_bearing_debt"] > fin["money_cap"]:
+        flags.append("INTEREST_BEARING_DEBT_ABOVE_CASH")
+    if fin.get("goodwill") is not None and fin.get("total_assets") not in (None, 0):
+        if fin["goodwill"] / fin["total_assets"] >= 0.1:
+            flags.append("GOODWILL_RATIO_HIGH")
+    if fin.get("operating_cashflow") is not None and fin["operating_cashflow"] < 0:
+        flags.append("OPERATING_CASHFLOW_NEGATIVE")
+    if fin.get("free_cashflow") is not None and fin["free_cashflow"] < 0:
+        flags.append("FREE_CASHFLOW_NEGATIVE")
+    if fin.get("operating_cashflow_to_net_profit") is not None and fin["operating_cashflow_to_net_profit"] < 0.8:
+        flags.append("CASHFLOW_TO_PROFIT_WEAK")
     mf = moneyflow.get("latest") or {}
     if mf.get("net_amount_5d") is not None and mf["net_amount_5d"] < 0:
         flags.append("MONEYFLOW_5D_NEGATIVE")
@@ -166,6 +245,16 @@ def _risk_flags(
         flags.append("MARKET_SENTIMENT_WEAK")
     if any(item.get("risk_level") in {"medium", "high"} for item in announcements[:5]):
         flags.append("ANNOUNCEMENT_EVENT_RISK")
+    if getattr(last_bar, "limit_up", None) is not None and getattr(last_bar, "close", None) is not None:
+        if last_bar.close >= last_bar.limit_up * 0.999:
+            flags.append("AT_LIMIT_UP")
+        elif getattr(last_bar, "pct_to_limit_up", None) is not None and last_bar.pct_to_limit_up <= 2:
+            flags.append("NEAR_LIMIT_UP")
+    if getattr(last_bar, "limit_down", None) is not None and getattr(last_bar, "close", None) is not None:
+        if last_bar.close <= last_bar.limit_down * 1.001:
+            flags.append("AT_LIMIT_DOWN")
+        elif getattr(last_bar, "pct_to_limit_down", None) is not None and last_bar.pct_to_limit_down <= 2:
+            flags.append("NEAR_LIMIT_DOWN")
     return flags
 
 
@@ -174,8 +263,10 @@ def _collect_data_gaps(
     moneyflow: dict[str, Any],
     market_context: dict[str, Any],
     announcements: list[dict[str, Any]],
+    daily_gaps: list[str] | None = None,
 ) -> list[str]:
     gaps: list[str] = []
+    gaps.extend(daily_gaps or [])
     gaps.extend(financials.get("gaps") or [])
     gaps.extend(moneyflow.get("gaps") or [])
     gaps.extend(market_context.get("gaps") or [])
@@ -204,6 +295,7 @@ def _build_data_audit(
     market_sentiment: dict[str, Any],
     announcements: list[dict[str, Any]],
     data_gaps: list[str],
+    tushare_extensions: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     optional_missing = []
     if not market_sentiment or market_sentiment.get("data_quality") == "warning":
@@ -217,15 +309,32 @@ def _build_data_audit(
         )
     return {
         "daily_bars_count": len(bars),
+        "has_adj_factor": any(getattr(bar, "adj_factor", None) is not None for bar in bars),
+        "has_qfq_prices": any(getattr(bar, "qfq_close", None) is not None for bar in bars),
+        "has_stk_limit": any(getattr(bar, "limit_up", None) is not None and getattr(bar, "limit_down", None) is not None for bar in bars),
         "has_ma20": indicators.get("ma20") is not None,
         "has_ma60": indicators.get("ma60") is not None,
         "has_financials": bool(financials.get("latest")),
+        "has_balancesheet": _has_any(
+            financials,
+            ["asset_liability_ratio", "money_cap", "accounts_receiv", "inventories", "goodwill", "interest_bearing_debt"],
+        ),
+        "has_cashflow": _has_any(
+            financials,
+            ["operating_cashflow", "investing_cashflow", "financing_cashflow", "free_cashflow", "operating_cashflow_to_net_profit"],
+        ),
         "has_moneyflow": bool(moneyflow.get("latest")),
         "has_market_indices": bool(market_context.get("indices")),
         "has_market_sentiment": bool(market_sentiment) and market_sentiment.get("data_quality") != "warning",
         "announcements_count": len(announcements),
         "high_risk_announcements_count": sum(1 for item in announcements if item.get("risk_level") == "high"),
         "optional_fields_missing": optional_missing,
+        "reserved_tushare_fields": (tushare_extensions or {}).get("reserved") or {},
         "data_gaps_count": len(data_gaps),
         "data_gaps": data_gaps,
     }
+
+
+def _has_any(financials: dict[str, Any], keys: list[str]) -> bool:
+    latest = financials.get("latest") or {}
+    return any(latest.get(key) is not None for key in keys)

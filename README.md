@@ -36,17 +36,32 @@ export TUSHARE_TOKEN=your_token
 当前数据全部通过 Tushare 获取：
 
 - 日线行情：`daily`
+- 复权因子：`adj_factor`，与 `daily` 合并生成 `qfq_open`、`qfq_high`、`qfq_low`、`qfq_close`，技术指标优先使用前复权价格计算
 - 估值：`daily_basic`
-- 财报：`fina_indicator`、`income`
+- 财报：`fina_indicator`、`income`、`balancesheet`、`cashflow`
 - 公告：`anns_d`
 - 资金流：`moneyflow`
 - 指数环境：`index_daily`
 - 行业分类：`index_member_all`
 - 行业指数：`sw_daily`
+- 涨跌停价：`stk_limit`，写入 `quote`、`daily_bars`，并参与 `risk_flags`
 - 市场情绪：优先 `limit_list_d`，降级 `limit_list_ths`，再降级 `stk_limit` + `daily` 近似计算
 - 股票名称映射：`stock_basic`
 
+已在 `market_pack.json` 中预留但可为空的 Tushare 字段：
+
+- 第二批：`fina_mainbz`、`forecast`、`express`、`dividend`、`disclosure_date`
+- 第三批：`top_list`、`top_inst`、`margin`、`margin_detail`、`moneyflow_hsgt`、`hsgt_top10`、`index_dailybasic`、`index_classify`、`index_member`、`concept`、`concept_detail`
+
 行业指数会优先通过 Tushare `index_member_all` 自动识别股票所属申万一级行业，再用 `sw_daily` 拉取对应行业指数；`config/industry_index_map.json` 仅用于人工覆盖或兜底。`limit_list_d`、`index_member_all` 和 `sw_daily` 这类频率受限接口会写入 `data_cache/`，同一交易日重复分析时优先使用缓存，避免反复触发 Tushare 限频。
+
+Tushare 调用默认会对限频、超时、临时连接失败做等待重试，默认等待序列为 `1,3` 秒，可通过环境变量覆盖：
+
+```bash
+export TUSHARE_RETRY_DELAYS=2,5,10
+```
+
+权限不足、接口不存在这类错误不会无意义重试，会优先尝试同源兜底。例如公告 `anns_d` 权限不足时，会尝试使用 `disclosure_date` 生成财报披露事件；行业指数 `sw_daily` 不可用时，会尝试 `index_daily` 和本地历史缓存。若仍不可用，必须继续写入 `data_gaps`，不能隐藏缺口或编造行业指数行情。
 
 市场情绪如果使用 `stk_limit` + `daily` 兜底，涨跌停状态由日线价格与涨跌停价近似计算，无法覆盖封板时间、封单金额和真实炸板次数。全部来源失败时，市场情绪只作为结构化 warning 记录，主报告和核心技术、估值、基本面分析继续生成。
 
@@ -61,6 +76,7 @@ export TUSHARE_TOKEN=your_token
 - `daily_bars`
 - `indicators`
 - `fundamental`
+- `tushare_extensions`
 - `announcements`
 - `moneyflow`
 - `market_context`
@@ -107,6 +123,7 @@ output/{中文名（symbol）}/report.md
 - `daily_bars`
 - `indicators`
 - `fundamental`
+- `tushare_extensions`
 - `announcements`
 - `moneyflow`
 - `market_context`
