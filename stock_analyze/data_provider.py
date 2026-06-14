@@ -319,10 +319,42 @@ class TushareProvider:
                 )
         if rows:
             return rows
+        fallback = self._fetch_akshare_announcements(symbol, start_date, end_date)
+        if fallback:
+            return fallback
         fallback = self._fetch_disclosure_events(symbol, start_date, end_date)
         if fallback:
             return fallback
         self._data_gaps.extend(gaps)
+        return rows
+
+    def _fetch_akshare_announcements(self, symbol: str, start_date: date, end_date: date) -> list[dict]:
+        gaps: list[str] = []
+        compact_symbol = symbol.split(".")[0]
+        df = _safe_df(
+            lambda: _load_akshare().stock_individual_notice_report(
+                security=compact_symbol,
+                symbol="全部",
+                begin_date=start_date.strftime("%Y%m%d"),
+                end_date=end_date.strftime("%Y%m%d"),
+            ),
+            "akshare.stock_individual_notice_report",
+            gaps,
+        )
+        if df is None or df.empty:
+            return []
+        rows: list[dict] = []
+        for row in df.sort_values("公告日期", ascending=False).head(10).to_dict("records"):
+            rows.append(
+                {
+                    "date": _fmt_any_date(row.get("公告日期")),
+                    "title": row.get("公告标题"),
+                    "type": row.get("公告类型") or "公告",
+                    "url": row.get("网址"),
+                    "source": "akshare.stock_individual_notice_report",
+                    "data_quality": "fallback",
+                }
+            )
         return rows
 
     def _fetch_disclosure_events(self, symbol: str, start_date: date, end_date: date) -> list[dict]:
@@ -466,6 +498,10 @@ class TushareProvider:
             source = "tushare.index_daily"
             pct_col = "pct_chg"
             if df is None or df.empty:
+                akshare_industry = self._fetch_akshare_sw_industry_context(mapping, trade_date)
+                if akshare_industry:
+                    _write_cache(cache_key, akshare_industry)
+                    return akshare_industry
                 cached_latest = _read_latest_cache_prefix(f"industry_{mapping['ts_code']}_")
                 if cached_latest:
                     cached_latest["data_quality"] = "cached_stale"
@@ -498,6 +534,43 @@ class TushareProvider:
         }
         _write_cache(cache_key, result)
         return result
+
+    def _fetch_akshare_sw_industry_context(self, mapping: dict[str, Any], trade_date: str) -> dict[str, Any] | None:
+        ts_code = str(mapping.get("ts_code") or "")
+        if not ts_code:
+            return None
+        compact_code = ts_code.split(".")[0]
+        gaps: list[str] = []
+        df = _safe_df(
+            lambda: _load_akshare().index_hist_sw(symbol=compact_code, period="day"),
+            f"akshare.index_hist_sw:{compact_code}",
+            gaps,
+        )
+        if df is None or df.empty:
+            return None
+        target = date.fromisoformat(_fmt_trade_date(trade_date))
+        rows = []
+        for row in df.to_dict("records"):
+            row_date = _parse_any_date(row.get("日期"))
+            if row_date and row_date <= target:
+                rows.append((row_date, row))
+        if not rows:
+            return None
+        rows.sort(key=lambda item: item[0])
+        row_date, row = rows[-1]
+        prev_close = _num(rows[-2][1].get("收盘")) if len(rows) >= 2 else None
+        close = _num(row.get("收盘"))
+        return {
+            "status": "ok",
+            "ts_code": ts_code,
+            "name": mapping.get("name"),
+            "trade_date": row_date.isoformat(),
+            "close": close,
+            "pct_chg": _pct_change(close, prev_close),
+            "source": "akshare.index_hist_sw",
+            "mapping_source": mapping.get("source"),
+            "data_quality": "fallback",
+        }
 
     def _resolve_industry_index(self, symbol: str | None, gaps: list[str]) -> dict[str, Any] | None:
         if not symbol:
@@ -585,6 +658,33 @@ def _fmt_trade_date(value: str) -> str:
     return f"{value[:4]}-{value[4:6]}-{value[6:8]}"
 
 
+def _fmt_any_date(value: Any) -> str:
+    parsed = _parse_any_date(value)
+    return parsed.isoformat() if parsed else str(value or "")
+
+
+def _parse_any_date(value: Any) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+        try:
+            return date.fromisoformat(text[:10])
+        except ValueError:
+            return None
+    compact = text.replace("-", "")[:8]
+    if len(compact) == 8 and compact.isdigit():
+        try:
+            return date(int(compact[:4]), int(compact[4:6]), int(compact[6:8]))
+        except ValueError:
+            return None
+    return None
+
+
 def _compact_date(value: str) -> str:
     return value.replace("-", "")
 
@@ -642,6 +742,18 @@ def _ratio(numerator: float | None, denominator: float | None) -> float | None:
     if numerator is None or denominator in (None, 0):
         return None
     return round(numerator / denominator, 4)
+
+
+def _pct_change(current: float | None, previous: float | None) -> float | None:
+    if current is None or previous in (None, 0):
+        return None
+    return round((current / previous - 1) * 100, 4)
+
+
+def _load_akshare():
+    import akshare as ak
+
+    return ak
 
 
 def _empty_tushare_reserved() -> dict[str, list[dict]]:

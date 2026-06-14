@@ -68,11 +68,13 @@ def test_run_single_stock_analysis(tmp_path: Path):
     output_dir = tmp_path / "贵州茅台（600519.SH）"
 
     assert result["results"][0]["scorecard"]["rating"] in {"watch", "neutral", "avoid"}
-    assert result["results"][0]["report_path"].endswith("贵州茅台（600519.SH）/report.md")
+    assert result["results"][0]["report_path"].endswith("贵州茅台（600519.SH）/report.html")
+    assert result["results"][0]["markdown_report_path"].endswith("贵州茅台（600519.SH）/report.md")
     assert (output_dir / "market_pack.json").exists()
     assert (output_dir / "raw_data.json").exists()
     assert (output_dir / "scorecard.json").exists()
     assert (output_dir / "report.md").exists()
+    assert (output_dir / "report.html").exists()
     assert (output_dir / "audit.md").exists()
     pack = json.loads((output_dir / "market_pack.json").read_text(encoding="utf-8"))
     assert pack["meta"]["name"] == "贵州茅台"
@@ -102,6 +104,10 @@ def test_run_single_stock_analysis(tmp_path: Path):
     assert "资金流分析" in report
     assert "公告与事件风险" in report
     assert "市场情绪与涨跌停结构" in report
+    html = (output_dir / "report.html").read_text(encoding="utf-8")
+    assert "<!doctype html>" in html
+    assert "<title>贵州茅台（600519.SH）中文多维研究报告</title>" in html
+    assert "贵州茅台（600519.SH）中文多维研究报告" in html
 
 
 def test_report_uses_chinese_risk_descriptions(tmp_path: Path):
@@ -143,6 +149,8 @@ def test_run_position_analysis(tmp_path: Path):
 
     text = (tmp_path / "贵州茅台（600519.SH）" / "position_report.md").read_text(encoding="utf-8")
     assert "相对成本" in text
+    html = (tmp_path / "贵州茅台（600519.SH）" / "position_report.html").read_text(encoding="utf-8")
+    assert "相对成本" in html
 
 
 def test_run_watchlist_analysis(tmp_path: Path):
@@ -155,6 +163,9 @@ def test_run_watchlist_analysis(tmp_path: Path):
     assert "贵州茅台（600519.SH）" in text
     assert "宁德时代（300750.SZ）" in text
     assert "不构成买入推荐" in text
+    html = (tmp_path / "watchlist_report.html").read_text(encoding="utf-8")
+    assert "<table>" in html
+    assert "观察池对比报告" in html
 
 
 def test_pipeline_keeps_running_when_market_sentiment_warns(tmp_path: Path):

@@ -7,7 +7,7 @@ from .data_provider import MarketDataProvider, default_provider
 from .io import write_json, write_text
 from .pack import build_market_pack
 from .parser import parse_user_request
-from .report import render_audit, render_dossier, render_report, render_watchlist_report
+from .report import render_audit, render_dossier, render_html_document, render_report, render_watchlist_report
 from .scoring import build_scorecard
 from .symbols import ensure_symbol_cache
 
@@ -29,11 +29,23 @@ def run_analysis(text: str, out_dir: Path = Path("output"), provider: MarketData
         write_text(symbol_dir / "audit.md", render_audit(pack, scorecard))
         write_text(symbol_dir / "decision_dossier.md", render_dossier(pack, scorecard))
         report_name = "position_report.md" if request.mode == "position_check" else "report.md"
+        html_report_name = report_name.removesuffix(".md") + ".html"
         position = request.position.to_dict() if request.position else None
-        write_text(symbol_dir / report_name, render_report(pack, scorecard, position))
-        results.append({"pack": pack, "scorecard": scorecard, "report_path": str(symbol_dir / report_name)})
+        report_markdown = render_report(pack, scorecard, position)
+        write_text(symbol_dir / report_name, report_markdown)
+        write_text(symbol_dir / html_report_name, render_html_document(report_markdown, _html_title(pack, report_name)))
+        results.append(
+            {
+                "pack": pack,
+                "scorecard": scorecard,
+                "report_path": str(symbol_dir / html_report_name),
+                "markdown_report_path": str(symbol_dir / report_name),
+            }
+        )
     if request.mode == "watchlist_review" or len(results) > 1:
-        write_text(out_dir / "watchlist_report.md", render_watchlist_report(results))
+        watchlist_markdown = render_watchlist_report(results)
+        write_text(out_dir / "watchlist_report.md", watchlist_markdown)
+        write_text(out_dir / "watchlist_report.html", render_html_document(watchlist_markdown, "观察池对比报告"))
     return {"request": request.to_dict(), "results": results}
 
 
@@ -47,6 +59,13 @@ def _output_dir_name(pack: dict[str, Any]) -> str:
 
 def _sanitize_path_part(value: str) -> str:
     return "".join("_" if char in '/\\:*?"<>|' else char for char in value).strip() or "unknown"
+
+
+def _html_title(pack: dict[str, Any], report_name: str) -> str:
+    name = pack["meta"].get("name")
+    symbol = pack["meta"]["symbol"]
+    display = f"{name}（{symbol}）" if name else str(symbol)
+    return f"{display}持仓风险快检" if report_name.startswith("position_") else f"{display}中文多维研究报告"
 
 
 def _build_raw_data(pack: dict[str, Any]) -> dict[str, Any]:

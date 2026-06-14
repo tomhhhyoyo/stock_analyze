@@ -1,4 +1,5 @@
 from datetime import date
+from types import SimpleNamespace
 
 import pandas as pd
 
@@ -94,6 +95,41 @@ def test_fetch_industry_context_falls_back_to_index_daily(tmp_path, monkeypatch)
     assert industry["pct_chg"] == 0.9
 
 
+class AkshareIndustryPro(FallbackIndustryPro):
+    def index_daily(self, **kwargs):
+        return pd.DataFrame()
+
+
+def test_fetch_industry_context_falls_back_to_akshare_sw_index(tmp_path, monkeypatch):
+    monkeypatch.setattr(data_provider, "CACHE_DIR", tmp_path / "data_cache")
+    monkeypatch.setattr(data_provider, "INDUSTRY_INDEX_MAP_PATH", tmp_path / "missing.json")
+
+    fake_ak = SimpleNamespace(
+        index_hist_sw=lambda **kwargs: pd.DataFrame(
+            [
+                {"代码": "801080", "日期": date(2026, 6, 1), "收盘": 3900.0},
+                {"代码": "801080", "日期": date(2026, 6, 2), "收盘": 4000.0},
+            ]
+        )
+    )
+    monkeypatch.setattr(data_provider, "_load_akshare", lambda: fake_ak)
+
+    provider = TushareProvider.__new__(TushareProvider)
+    provider.pro = AkshareIndustryPro()
+    provider._data_gaps = []
+    gaps = []
+
+    industry = provider._fetch_industry_context("301366.SZ", "20260602", gaps)
+
+    assert gaps == []
+    assert provider.consume_data_gaps() == []
+    assert industry["status"] == "ok"
+    assert industry["source"] == "akshare.index_hist_sw"
+    assert industry["data_quality"] == "fallback"
+    assert industry["close"] == 4000.0
+    assert industry["pct_chg"] == 2.5641
+
+
 class DisclosureFallbackPro:
     def anns_d(self, **kwargs):
         raise RuntimeError("没有权限")
@@ -124,6 +160,35 @@ def test_fetch_announcements_falls_back_to_disclosure_date():
 
     assert rows[0]["source"] == "tushare.disclosure_date"
     assert rows[0]["type"] == "财报披露"
+    assert provider.consume_data_gaps() == []
+
+
+def test_fetch_announcements_falls_back_to_akshare(monkeypatch):
+    fake_ak = SimpleNamespace(
+        stock_individual_notice_report=lambda **kwargs: pd.DataFrame(
+            [
+                {
+                    "代码": "601728",
+                    "名称": "中国电信",
+                    "公告标题": "中国电信年度报告",
+                    "公告类型": "财务报告",
+                    "公告日期": date(2026, 4, 20),
+                    "网址": "https://example.com/notice",
+                }
+            ]
+        )
+    )
+    monkeypatch.setattr(data_provider, "_load_akshare", lambda: fake_ak)
+
+    provider = TushareProvider.__new__(TushareProvider)
+    provider.pro = DisclosureFallbackPro()
+    provider._data_gaps = []
+
+    rows = provider.fetch_announcements("601728.SH", date(2026, 1, 1), date(2026, 6, 2))
+
+    assert rows[0]["source"] == "akshare.stock_individual_notice_report"
+    assert rows[0]["title"] == "中国电信年度报告"
+    assert rows[0]["date"] == "2026-04-20"
     assert provider.consume_data_gaps() == []
 
 

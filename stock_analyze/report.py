@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import html
+import re
 from typing import Any
 
 
@@ -155,6 +157,184 @@ def render_report(pack: dict[str, Any], scorecard: dict[str, Any], position: dic
 
 本报告仅用于学习研究和流程演示，不构成投资建议。市场有风险，决策需独立判断。
 """
+
+
+def render_html_document(markdown_text: str, title: str) -> str:
+    body = _markdown_to_html(markdown_text)
+    safe_title = html.escape(title)
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{safe_title}</title>
+  <style>
+    :root {{
+      color-scheme: light;
+      --bg: #f7f8fa;
+      --paper: #ffffff;
+      --text: #1f2937;
+      --muted: #64748b;
+      --border: #d9e0ea;
+      --accent: #0f766e;
+      --soft: #eef7f6;
+      --danger: #b91c1c;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.72;
+    }}
+    main {{
+      width: min(1080px, calc(100% - 32px));
+      margin: 32px auto;
+      padding: 36px 40px;
+      background: var(--paper);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
+    }}
+    h1, h2, h3 {{ line-height: 1.28; margin: 28px 0 14px; }}
+    h1 {{ margin-top: 0; font-size: 30px; color: #0f172a; }}
+    h2 {{ padding-top: 12px; border-top: 1px solid var(--border); font-size: 22px; color: var(--accent); }}
+    h3 {{ font-size: 18px; }}
+    p {{ margin: 10px 0; }}
+    ul {{ padding-left: 22px; margin: 10px 0 18px; }}
+    li {{ margin: 6px 0; }}
+    strong {{ color: #0f172a; }}
+    code {{
+      padding: 2px 6px;
+      border-radius: 5px;
+      background: #eef2f7;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+    }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0 22px;
+      font-size: 14px;
+    }}
+    th, td {{
+      border: 1px solid var(--border);
+      padding: 9px 10px;
+      text-align: left;
+      vertical-align: top;
+    }}
+    th {{ background: var(--soft); color: #0f172a; }}
+    .meta {{
+      margin-bottom: 20px;
+      color: var(--muted);
+      font-size: 13px;
+    }}
+    @media (max-width: 720px) {{
+      main {{ width: 100%; margin: 0; padding: 24px 18px; border-radius: 0; border-left: 0; border-right: 0; }}
+      h1 {{ font-size: 24px; }}
+      h2 {{ font-size: 19px; }}
+      table {{ display: block; overflow-x: auto; white-space: nowrap; }}
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <div class="meta">本 HTML 由项目生成，数值来源以同目录 <code>market_pack.json</code> 为准。</div>
+{body}
+  </main>
+</body>
+</html>
+"""
+
+
+def _markdown_to_html(markdown_text: str) -> str:
+    lines = markdown_text.splitlines()
+    chunks: list[str] = []
+    paragraph: list[str] = []
+    bullets: list[str] = []
+    i = 0
+
+    def flush_paragraph() -> None:
+        if paragraph:
+            chunks.append(f"    <p>{_inline_html(' '.join(paragraph))}</p>")
+            paragraph.clear()
+
+    def flush_bullets() -> None:
+        if bullets:
+            chunks.append("    <ul>")
+            chunks.extend(f"      <li>{item}</li>" for item in bullets)
+            chunks.append("    </ul>")
+            bullets.clear()
+
+    while i < len(lines):
+        line = lines[i].rstrip()
+        if not line:
+            flush_paragraph()
+            flush_bullets()
+            i += 1
+            continue
+        if line.startswith("|") and i + 1 < len(lines) and _is_table_separator(lines[i + 1]):
+            flush_paragraph()
+            flush_bullets()
+            table_lines = [line]
+            i += 2
+            while i < len(lines) and lines[i].startswith("|"):
+                table_lines.append(lines[i].rstrip())
+                i += 1
+            chunks.append(_table_html(table_lines))
+            continue
+        if line.startswith("#"):
+            flush_paragraph()
+            flush_bullets()
+            level = min(len(line) - len(line.lstrip("#")), 3)
+            text = line[level:].strip()
+            chunks.append(f"    <h{level}>{_inline_html(text)}</h{level}>")
+            i += 1
+            continue
+        if line.startswith("- "):
+            flush_paragraph()
+            bullets.append(_inline_html(line[2:].strip()))
+            i += 1
+            continue
+        paragraph.append(line.strip())
+        i += 1
+    flush_paragraph()
+    flush_bullets()
+    return "\n".join(chunks)
+
+
+def _inline_html(text: str) -> str:
+    escaped = html.escape(text)
+    escaped = re.sub(r"`([^`]+)`", r"<code>\1</code>", escaped)
+    escaped = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", escaped)
+    return escaped
+
+
+def _is_table_separator(line: str) -> bool:
+    stripped = line.strip()
+    return stripped.startswith("|") and set(stripped.replace("|", "").replace(" ", "")) <= {"-", ":"}
+
+
+def _table_html(lines: list[str]) -> str:
+    rows = [_split_table_row(line) for line in lines]
+    if not rows:
+        return ""
+    head = rows[0]
+    body = rows[1:]
+    parts = ["    <table>", "      <thead>", "        <tr>"]
+    parts.extend(f"          <th>{_inline_html(cell)}</th>" for cell in head)
+    parts.extend(["        </tr>", "      </thead>", "      <tbody>"])
+    for row in body:
+        parts.append("        <tr>")
+        parts.extend(f"          <td>{_inline_html(cell)}</td>" for cell in row)
+        parts.append("        </tr>")
+    parts.extend(["      </tbody>", "    </table>"])
+    return "\n".join(parts)
+
+
+def _split_table_row(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
 
 
 def render_audit(pack: dict[str, Any], scorecard: dict[str, Any]) -> str:

@@ -48,6 +48,11 @@ export TUSHARE_TOKEN=your_token
 - 市场情绪：优先 `limit_list_d`，降级 `limit_list_ths`，再降级 `stk_limit` + `daily` 近似计算
 - 股票名称映射：`stock_basic`
 
+Tushare 仍是主数据源。若 Tushare 个别接口因权限不足或接口覆盖问题不可用，项目会尝试 AkShare 公开数据作为兜底，并在 `market_pack.json` 中明确写入 `source=akshare.*`：
+
+- 公告兜底：`stock_individual_notice_report`
+- 申万行业指数兜底：`index_hist_sw`
+
 已在 `market_pack.json` 中预留但可为空的 Tushare 字段：
 
 - 第二批：`fina_mainbz`、`forecast`、`express`、`dividend`、`disclosure_date`
@@ -61,7 +66,7 @@ Tushare 调用默认会对限频、超时、临时连接失败做等待重试，
 export TUSHARE_RETRY_DELAYS=2,5,10
 ```
 
-权限不足、接口不存在这类错误不会无意义重试，会优先尝试同源兜底。例如公告 `anns_d` 权限不足时，会尝试使用 `disclosure_date` 生成财报披露事件；行业指数 `sw_daily` 不可用时，会尝试 `index_daily` 和本地历史缓存。若仍不可用，必须继续写入 `data_gaps`，不能隐藏缺口或编造行业指数行情。
+权限不足、接口不存在这类错误不会无意义重试，会优先尝试同源兜底和 AkShare 公开数据兜底。例如公告 `anns_d` 权限不足时，会先尝试 AkShare 个股公告，再尝试 `disclosure_date` 生成财报披露事件；行业指数 `sw_daily` 不可用时，会尝试 `index_daily`、AkShare 申万指数和本地历史缓存。若仍不可用，必须继续写入 `data_gaps`，不能隐藏缺口或编造行业指数行情。
 
 市场情绪如果使用 `stk_limit` + `daily` 兜底，涨跌停状态由日线价格与涨跌停价近似计算，无法覆盖封板时间、封单金额和真实炸板次数。全部来源失败时，市场情绪只作为结构化 warning 记录，主报告和核心技术、估值、基本面分析继续生成。
 
@@ -114,6 +119,7 @@ output/{中文名（symbol）}/scorecard.json
 output/{中文名（symbol）}/audit.md
 output/{中文名（symbol）}/decision_dossier.md
 output/{中文名（symbol）}/report.md
+output/{中文名（symbol）}/report.html
 ```
 
 如果中文名缺失，输出目录会回退为 `output/{symbol}`。
@@ -169,6 +175,7 @@ config/symbol_cache.json
 
 ```text
 output/watchlist_report.md
+output/watchlist_report.html
 ```
 
 ## 评级

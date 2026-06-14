@@ -60,6 +60,7 @@ description: 使用中文命令和自然语言输入，对用户指定的 A 股�
 → 生成 audit.md
 → 生成 decision_dossier.md
 → 生成中文 report.md / position_report.md / watchlist_report.md
+→ 生成浏览器可打开的 report.html / position_report.html / watchlist_report.html
 → 在对话中输出中文摘要
 ```
 
@@ -88,9 +89,10 @@ description: 使用中文命令和自然语言输入，对用户指定的 A 股�
 ## 数据缺口处理
 
 - Tushare 限频、超时、临时连接失败默认按 `TUSHARE_RETRY_DELAYS=1,3` 秒等待重试，可通过环境变量调整。
-- 权限不足、接口不存在不做无意义重试，必须尝试同源兜底或缓存。
-- 公告 `anns_d` 不可用时，优先用 `disclosure_date` 生成财报披露事件。
-- 行业指数 `sw_daily` 不可用时，优先尝试 `index_daily`，再尝试本地历史缓存。
+- 权限不足、接口不存在不做无意义重试，必须尝试同源兜底、AkShare 公开数据兜底或缓存。
+- 公告 `anns_d` 不可用时，优先用 AkShare `stock_individual_notice_report`，再用 `disclosure_date` 生成财报披露事件。
+- 行业指数 `sw_daily` 不可用时，优先尝试 `index_daily`，再尝试 AkShare `index_hist_sw` 和本地历史缓存。
+- 使用 AkShare 兜底时必须在 `market_pack.json` 写明 `source=akshare.*`，报告数值仍只能来自 `market_pack.json`。
 - 兜底后仍不可用时必须写入 `data_gaps` 和 `data_audit`，禁止隐藏失败或编造数值。
 
 ## 分析维度
@@ -119,19 +121,23 @@ output/{中文名（symbol）}/scorecard.json
 output/{中文名（symbol）}/audit.md
 output/{中文名（symbol）}/decision_dossier.md
 output/{中文名（symbol）}/report.md
+output/{中文名（symbol）}/report.html
 ```
 
 持仓快检：
 
 ```text
 output/{中文名（symbol）}/position_report.md
+output/{中文名（symbol）}/position_report.html
 ```
 
 观察池：
 
 ```text
 output/watchlist_report.md
+output/watchlist_report.html
 output/{中文名（symbol）}/report.md
+output/{中文名（symbol）}/report.html
 ```
 
 ## 中文报告结构
