@@ -165,7 +165,7 @@ def _akshare_sector_sentiment(industry: dict[str, Any], sector_members: dict[str
         "down_limit_count": down_count,
         "limit_break_count": len(break_rows),
         "limit_break_rate": round(len(break_rows) / total, 4) if total else None,
-        "source": "akshare.limit_pool_sector_filter+stock_zh_a_spot_em",
+        "source": "akshare.limit_pool_sector_filter+" + str(spot_stats.get("source") or "limit_pool_only"),
         "sector_name": sector_name,
         "limit_calc_note": "涨停/跌停数量由行业成分代码匹配全市场日涨跌幅近似计算；炸板数优先来自炸板池。",
     }
@@ -184,9 +184,24 @@ def _safe_pool_rows(ak: Any, func_name: str, sector_name: str, member_codes: set
 def _akshare_spot_limit_stats(member_codes: set[str]) -> dict[str, Any]:
     if not member_codes:
         return {}
+    rows: list[dict[str, Any]] = []
+    source = ""
     try:
-        rows = _records(_load_akshare().stock_zh_a_spot_em())
+        ak = _load_akshare()
     except Exception:  # noqa: BLE001 - AkShare 兜底失败不影响主流程
+        return {}
+    for func_name in ["stock_zh_a_spot_em", "stock_zh_a_spot"]:
+        func = getattr(ak, func_name, None)
+        if func is None:
+            continue
+        try:
+            rows = _records(func())
+            if rows:
+                source = f"akshare.{func_name}"
+                break
+        except Exception:  # noqa: BLE001 - 单个 AkShare 行情源失败时尝试下一个公开源
+            continue
+    if not rows:
         return {}
     up = 0
     down = 0
@@ -206,7 +221,7 @@ def _akshare_spot_limit_stats(member_codes: set[str]) -> dict[str, Any]:
             down += 1
     if matched == 0:
         return {}
-    return {"up_limit_count": up, "down_limit_count": down, "matched_count": matched, "source": "akshare.stock_zh_a_spot_em"}
+    return {"up_limit_count": up, "down_limit_count": down, "matched_count": matched, "source": source}
 
 
 def _filter_sector(rows: list[dict[str, Any]], sector_name: str, member_codes: set[str]) -> list[dict[str, Any]]:

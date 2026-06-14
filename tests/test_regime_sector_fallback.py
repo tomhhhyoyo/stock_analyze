@@ -31,15 +31,19 @@ def test_market_regime_uses_akshare_fallback_and_avoids_gaps(monkeypatch):
 
 
 def test_sector_context_uses_akshare_member_and_sentiment_fallback(monkeypatch):
+    def fail_spot_em():
+        raise ConnectionError("eastmoney disconnected")
+
     fake_ak = SimpleNamespace(
         index_component_sw=lambda **kwargs: pd.DataFrame([{"代码": "300308", "名称": "中际旭创", "日期": date(2026, 6, 12)}]),
         stock_zt_pool_em=lambda: pd.DataFrame([]),
         stock_zt_pool_zbgc_em=lambda: pd.DataFrame([]),
         stock_zt_pool_dtgc_em=lambda: pd.DataFrame([]),
-        stock_zh_a_spot_em=lambda: pd.DataFrame(
+        stock_zh_a_spot_em=fail_spot_em,
+        stock_zh_a_spot=lambda: pd.DataFrame(
             [
-                {"代码": "300308", "名称": "中际旭创", "涨跌幅": 20.0},
-                {"代码": "600000", "名称": "浦发银行", "涨跌幅": -10.0},
+                {"代码": "sz300308", "名称": "中际旭创", "涨跌幅": 20.0},
+                {"代码": "sh600000", "名称": "浦发银行", "涨跌幅": -10.0},
             ]
         ),
     )
@@ -60,4 +64,4 @@ def test_sector_context_uses_akshare_member_and_sentiment_fallback(monkeypatch):
     assert result["sector_sentiment"]["up_limit_count"] == 1
     assert result["sector_sentiment"]["down_limit_count"] == 0
     assert result["sector_sentiment"]["limit_break_count"] == 0
-    assert "stock_zh_a_spot_em" in result["sector_sentiment"]["source"]
+    assert "stock_zh_a_spot" in result["sector_sentiment"]["source"]
