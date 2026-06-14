@@ -650,15 +650,17 @@ def _market_regime_lines(pack: dict[str, Any], scorecard: dict[str, Any] | None 
     if not regime:
         return "- **大盘环境**：缺少大盘周期数据，已记录到数据缺口。"
     sent = regime.get("sentiment") or {}
+    turnover = regime.get("turnover") or {}
+    northbound = regime.get("northbound") or {}
     adjustments = (scorecard or {}).get("rating_adjustments") or []
     impact = "；".join(item.get("message", "") for item in adjustments if "大盘" in item.get("message", "")) or "暂无大盘评级闸门影响。"
     return "\n".join(
         [
             f"- **大盘周期**：{regime.get('verdict')}，阶段 {_market_stage_label(regime.get('stage'))}，分数 {regime.get('score')}/100，置信度 {regime.get('confidence')}。",
             f"- **主要指数趋势**：上涨指数数={((regime.get('breadth') or {}).get('positive_indices'))}，下跌指数数={((regime.get('breadth') or {}).get('negative_indices'))}。",
-            "- **市场成交额**：当前缺少指数成交额历史，已在数据缺口中记录 `index_dailybasic_missing`。",
+            f"- **市场成交额**：指数成交额5/20比均值={turnover.get('amount_ratio_5_20_avg')}，来源={turnover.get('source') or '缺失'}。",
             f"- **涨跌停情绪**：涨停数={sent.get('up_limit_count')}，跌停数={sent.get('down_limit_count')}，炸板数={sent.get('limit_break_count')}，炸板率={sent.get('limit_break_rate')}。",
-            f"- **北向资金**：接口不可用时记录 `moneyflow_hsgt_missing`，不影响主流程。",
+            f"- **北向资金**：1日净流入={northbound.get('net_inflow_1d')}，5日净流入={northbound.get('net_inflow_5d')}，20日净流入={northbound.get('net_inflow_20d')}，来源={northbound.get('source') or '缺失'}。",
             f"- **大盘对评级的影响**：{impact}",
         ]
     )

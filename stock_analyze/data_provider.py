@@ -467,20 +467,28 @@ class TushareProvider:
         gaps: list[str] = []
         indices = []
         end = _compact_date(trade_date) if trade_date else date.today().strftime("%Y%m%d")
-        start = (date.fromisoformat(_fmt_trade_date(end)) - timedelta(days=30)).strftime("%Y%m%d")
-        for ts_code, name in [("000001.SH", "上证指数"), ("000300.SH", "沪深300"), ("000905.SH", "中证500")]:
+        start = (date.fromisoformat(_fmt_trade_date(end)) - timedelta(days=140)).strftime("%Y%m%d")
+        for ts_code, name in [
+            ("000001.SH", "上证指数"),
+            ("399001.SZ", "深证成指"),
+            ("399006.SZ", "创业板指"),
+            ("000300.SH", "沪深300"),
+            ("000905.SH", "中证500"),
+            ("000852.SH", "中证1000"),
+        ]:
             df = _safe_df(
                 lambda ts_code=ts_code: self.pro.index_daily(
                     ts_code=ts_code,
                     start_date=start,
                     end_date=end,
-                    fields="ts_code,trade_date,close,pct_chg",
+                    fields="ts_code,trade_date,close,pct_chg,vol,amount",
                 ),
                 f"index_daily:{ts_code}",
                 gaps,
             )
             if df is not None and not df.empty:
-                row = df.sort_values("trade_date").iloc[-1].to_dict()
+                sorted_df = df.sort_values("trade_date")
+                row = sorted_df.iloc[-1].to_dict()
                 indices.append(
                     {
                         "ts_code": ts_code,
@@ -488,6 +496,18 @@ class TushareProvider:
                         "trade_date": _fmt_trade_date(str(row.get("trade_date", ""))),
                         "close": _num(row.get("close")),
                         "pct_chg": _num(row.get("pct_chg")),
+                        "amount": _num(row.get("amount")),
+                        "volume": _num(row.get("vol")),
+                        "history": [
+                            {
+                                "trade_date": _fmt_trade_date(str(item.get("trade_date", ""))),
+                                "close": _num(item.get("close")),
+                                "pct_chg": _num(item.get("pct_chg")),
+                                "amount": _num(item.get("amount")),
+                                "volume": _num(item.get("vol")),
+                            }
+                            for item in sorted_df.tail(80).to_dict("records")
+                        ],
                     }
                 )
         sentiment = fetch_market_sentiment(self.pro, end)

@@ -12,8 +12,12 @@ def analyze_sector_context(
     industry = market_context.get("industry") or {}
     if industry.get("status") != "ok":
         data_gaps.append("sector_index_missing")
-    data_gaps.append("sector_member_missing")
-    data_gaps.append("sector_sentiment_missing")
+    sector_members = _akshare_sector_members(industry)
+    if not sector_members:
+        data_gaps.append("sector_member_missing")
+    sector_sentiment = _akshare_sector_sentiment(industry, sector_members)
+    if not sector_sentiment:
+        data_gaps.append("sector_sentiment_missing")
 
     sector_ret20 = _num(industry.get("pct_chg"))
     stock_ret20 = _num(indicators.get("ret_20d_pct"))
@@ -60,7 +64,9 @@ def analyze_sector_context(
             "return_60d": None,
         },
         "sector_position": {"price_percentile_250d": None, "price_percentile_120d": None, "max_drawdown20": None},
-        "sector_sentiment": {"up_limit_count": None, "down_limit_count": None, "limit_break_count": None, "limit_break_rate": None},
+        "sector_members": sector_members,
+        "sector_sentiment": sector_sentiment
+        or {"up_limit_count": None, "down_limit_count": None, "limit_break_count": None, "limit_break_rate": None},
         "relative_strength": {
             "stock_return_20d": stock_ret20,
             "sector_return_20d": sector_ret20,
@@ -107,3 +113,155 @@ def _num(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _akshare_sector_members(industry: dict[str, Any]) -> dict[str, Any]:
+    code = str(industry.get("ts_code") or "").split(".")[0]
+    if not code:
+        return {}
+    try:
+        ak = _load_akshare()
+        for name in ["index_component_sw", "index_component"]:
+            func = getattr(ak, name, None)
+            if func is None:
+                continue
+            rows = _records(func(symbol=code))
+            if rows:
+                codes = [_stock_code(row) for row in rows]
+                return {
+                    "source": f"akshare.{name}",
+                    "count": len(rows),
+                    "codes": [code for code in codes if code],
+                    "sample": [_json_safe(row) for row in rows[:10]],
+                }
+    except Exception:  # noqa: BLE001 - AkShare 兜底失败不影响主流程
+        return {}
+    return {}
+
+
+def _akshare_sector_sentiment(industry: dict[str, Any], sector_members: dict[str, Any]) -> dict[str, Any]:
+    sector_name = str(industry.get("name") or "")
+    member_codes = {str(code).zfill(6) for code in sector_members.get("codes", [])}
+    if not member_codes:
+        member_codes = {str(row.get("证券代码") or row.get("代码") or "").zfill(6) for row in sector_members.get("sample", [])}
+    member_codes = {code for code in member_codes if code and code != "000000"}
+    if not sector_name and not member_codes:
+        return {}
+    try:
+        ak = _load_akshare()
+    except Exception:  # noqa: BLE001 - AkShare 兜底不可用时不影响主流程
+        return {}
+    up_rows = _safe_pool_rows(ak, "stock_zt_pool_em", sector_name, member_codes)
+    break_rows = _safe_pool_rows(ak, "stock_zt_pool_zbgc_em", sector_name, member_codes)
+    down_rows = _safe_pool_rows(ak, "stock_zt_pool_dtgc_em", sector_name, member_codes)
+    total = len(up_rows) + len(break_rows)
+    spot_stats = _akshare_spot_limit_stats(member_codes)
+    up_count = len(up_rows) or spot_stats.get("up_limit_count")
+    down_count = len(down_rows) or spot_stats.get("down_limit_count")
+    if up_count is None and down_count is None and not break_rows:
+        return {}
+    return {
+        "up_limit_count": up_count,
+        "down_limit_count": down_count,
+        "limit_break_count": len(break_rows),
+        "limit_break_rate": round(len(break_rows) / total, 4) if total else None,
+        "source": "akshare.limit_pool_sector_filter+stock_zh_a_spot_em",
+        "sector_name": sector_name,
+        "limit_calc_note": "涨停/跌停数量由行业成分代码匹配全市场日涨跌幅近似计算；炸板数优先来自炸板池。",
+    }
+
+
+def _safe_pool_rows(ak: Any, func_name: str, sector_name: str, member_codes: set[str]) -> list[dict[str, Any]]:
+    func = getattr(ak, func_name, None)
+    if func is None:
+        return []
+    try:
+        return _filter_sector(_records(func()), sector_name, member_codes)
+    except Exception:  # noqa: BLE001 - 单个 AkShare 池子失败不影响实时行情兜底
+        return []
+
+
+def _akshare_spot_limit_stats(member_codes: set[str]) -> dict[str, Any]:
+    if not member_codes:
+        return {}
+    try:
+        rows = _records(_load_akshare().stock_zh_a_spot_em())
+    except Exception:  # noqa: BLE001 - AkShare 兜底失败不影响主流程
+        return {}
+    up = 0
+    down = 0
+    matched = 0
+    for row in rows:
+        code = _stock_code(row)
+        if code not in member_codes:
+            continue
+        pct = _num(row.get("涨跌幅") or row.get("changepercent") or row.get("pct_chg"))
+        if pct is None:
+            continue
+        matched += 1
+        threshold = _limit_threshold(code, str(row.get("名称") or row.get("name") or ""))
+        if pct >= threshold:
+            up += 1
+        elif pct <= -threshold:
+            down += 1
+    if matched == 0:
+        return {}
+    return {"up_limit_count": up, "down_limit_count": down, "matched_count": matched, "source": "akshare.stock_zh_a_spot_em"}
+
+
+def _filter_sector(rows: list[dict[str, Any]], sector_name: str, member_codes: set[str]) -> list[dict[str, Any]]:
+    keys = ["行业", "所属行业", "板块", "概念", "所属概念"]
+    result = []
+    for row in rows:
+        code = _stock_code(row)
+        if code in member_codes:
+            result.append(row)
+            continue
+        text = " ".join(str(row.get(key) or "") for key in keys)
+        if sector_name and sector_name in text:
+            result.append(row)
+    return result
+
+
+def _stock_code(row: dict[str, Any]) -> str:
+    raw = str(row.get("证券代码") or row.get("代码") or row.get("code") or "").strip()
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    return digits[-6:].zfill(6) if digits else ""
+
+
+def _limit_threshold(code: str, name: str) -> float:
+    if "ST" in name.upper() or "退" in name:
+        return 4.8
+    if code.startswith(("300", "301", "688", "689")):
+        return 19.5
+    if code.startswith(("8", "4", "920")):
+        return 29.0
+    return 9.5
+
+
+def _records(df: Any) -> list[dict[str, Any]]:
+    if df is None:
+        return []
+    if hasattr(df, "to_dict"):
+        return list(df.to_dict("records"))
+    if isinstance(df, list):
+        return [item for item in df if isinstance(item, dict)]
+    return []
+
+
+def _json_safe(row: dict[str, Any]) -> dict[str, Any]:
+    return {str(key): _json_value(value) for key, value in row.items()}
+
+
+def _json_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+def _load_akshare():
+    import akshare as ak
+
+    return ak
