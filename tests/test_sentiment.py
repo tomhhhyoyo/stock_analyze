@@ -1,4 +1,5 @@
 import pandas as pd
+from types import SimpleNamespace
 
 import stock_analyze.sentiment as sentiment
 from stock_analyze.sentiment import fetch_market_sentiment
@@ -56,6 +57,14 @@ class PriceFallbackPro:
         )
 
 
+class AkshareFallbackPro:
+    def limit_list_d(self, **kwargs):
+        raise RuntimeError("没有权限")
+
+    def limit_list_ths(self, **kwargs):
+        raise RuntimeError("没有权限")
+
+
 class AllFailPro:
     def limit_list_d(self, **kwargs):
         raise RuntimeError("limit_list_d failed")
@@ -111,6 +120,7 @@ def test_limit_list_d_fails_then_ths_success(monkeypatch, tmp_path):
 
 def test_two_sources_fail_then_stk_limit_daily_success(monkeypatch, tmp_path):
     monkeypatch.setattr(sentiment, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(sentiment, "_load_akshare", lambda: _empty_akshare_limit_pool())
 
     result = fetch_market_sentiment(PriceFallbackPro(), "20260602")
 
@@ -123,8 +133,26 @@ def test_two_sources_fail_then_stk_limit_daily_success(monkeypatch, tmp_path):
     assert "日线价格与涨跌停价近似计算" in result["warnings"][-1]["message"]
 
 
+def test_tushare_limit_permission_denied_falls_back_to_akshare(monkeypatch, tmp_path):
+    monkeypatch.setattr(sentiment, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(sentiment, "_load_akshare", lambda: _akshare_limit_pool())
+
+    result = fetch_market_sentiment(AkshareFallbackPro(), "20260602")
+
+    assert result["source"] == "akshare.stock_zt_pool_em+stock_zt_pool_zbgc_em+stock_zt_pool_dtgc_em"
+    assert result["data_quality"] == "full"
+    assert result["up_limit_count"] == 2
+    assert result["down_limit_count"] == 1
+    assert result["limit_break_count"] == 1
+    assert result["highest_limit_step"] == 3
+    assert result["warnings"] == []
+    assert result["fallback_attempts"][0]["source"] == "tushare.limit_list_d"
+    assert result["fallback_attempts"][1]["source"] == "tushare.limit_list_ths"
+
+
 def test_all_sources_fail_returns_warning(monkeypatch, tmp_path):
     monkeypatch.setattr(sentiment, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(sentiment, "_load_akshare", lambda: _empty_akshare_limit_pool())
 
     result = fetch_market_sentiment(AllFailPro(), "20260602")
 
@@ -146,3 +174,47 @@ def test_market_sentiment_retries_rate_limited_source(monkeypatch, tmp_path):
     assert pro.calls == 3
     assert result["source"] == "tushare.limit_list_d"
     assert result["up_limit_count"] == 1
+
+
+def test_partial_stk_limit_cache_refreshes_to_akshare(monkeypatch, tmp_path):
+    monkeypatch.setattr(sentiment, "CACHE_DIR", tmp_path)
+    cache_path = tmp_path / "market_sentiment_20260602.json"
+    cache_path.write_text(
+        '{"source":"tushare.stk_limit+tushare.daily","data_quality":"partial","warnings":[{"exception_message":"cannot convert float NaN to integer"}]}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sentiment, "_load_akshare", lambda: _akshare_limit_pool())
+
+    result = fetch_market_sentiment(AkshareFallbackPro(), "20260602")
+
+    assert result["source"] == "akshare.stock_zt_pool_em+stock_zt_pool_zbgc_em+stock_zt_pool_dtgc_em"
+    assert result["warnings"] == []
+
+
+def _akshare_limit_pool():
+    return SimpleNamespace(
+        stock_zt_pool_em=lambda **kwargs: pd.DataFrame(
+            [
+                {"代码": "000001", "名称": "A", "连板数": 3},
+                {"代码": "000002", "名称": "B", "连板数": float("nan"), "涨停统计": "1/1"},
+            ]
+        ),
+        stock_zt_pool_zbgc_em=lambda **kwargs: pd.DataFrame(
+            [
+                {"代码": "000003", "名称": "C", "涨停统计": "2/3"},
+            ]
+        ),
+        stock_zt_pool_dtgc_em=lambda **kwargs: pd.DataFrame(
+            [
+                {"代码": "000004", "名称": "D", "连续跌停": 1},
+            ]
+        ),
+    )
+
+
+def _empty_akshare_limit_pool():
+    return SimpleNamespace(
+        stock_zt_pool_em=lambda **kwargs: pd.DataFrame(),
+        stock_zt_pool_zbgc_em=lambda **kwargs: pd.DataFrame(),
+        stock_zt_pool_dtgc_em=lambda **kwargs: pd.DataFrame(),
+    )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 from pathlib import Path
@@ -12,17 +13,22 @@ CACHE_DIR = Path("data_cache")
 def fetch_market_sentiment(pro: Any, trade_date: str) -> dict[str, Any]:
     compact = trade_date.replace("-", "")
     cached = _read_cache(f"market_sentiment_{compact}")
-    if cached:
+    if cached and not _should_refresh_sentiment_cache(cached):
         return cached
     warnings: list[dict[str, Any]] = []
     for source, fetcher in [
         ("tushare.limit_list_d", lambda: _from_limit_list_d(pro, compact)),
         ("tushare.limit_list_ths", lambda: _from_limit_list_ths(pro, compact)),
+        ("akshare.limit_pool", lambda: _from_akshare_limit_pool(compact)),
         ("tushare.stk_limit+tushare.daily", lambda: _from_stk_limit_daily(pro, compact)),
     ]:
         result = _try_source(source, fetcher, warnings)
         if result:
-            result["warnings"] = warnings + list(result.get("warnings") or [])
+            if str(result.get("source", "")).startswith("akshare."):
+                result["fallback_attempts"] = warnings
+                result["warnings"] = list(result.get("warnings") or [])
+            else:
+                result["warnings"] = warnings + list(result.get("warnings") or [])
             _write_cache(f"market_sentiment_{compact}", result)
             return result
     return _empty_warning(compact, warnings)
@@ -49,6 +55,14 @@ def _try_source(source: str, fetcher: Callable[[], dict[str, Any] | None], warni
             }
         )
     return None
+
+
+def _should_refresh_sentiment_cache(cached: dict[str, Any]) -> bool:
+    source = str(cached.get("source") or "")
+    if source == "tushare.stk_limit+tushare.daily" and cached.get("data_quality") == "partial":
+        return True
+    warnings = cached.get("warnings") or []
+    return any("cannot convert float NaN" in str(item.get("exception_message") or item.get("message") or "") for item in warnings)
 
 
 def _retry_schedule() -> list[float | None]:
@@ -129,6 +143,30 @@ def _from_limit_list_ths(pro: Any, trade_date: str) -> dict[str, Any] | None:
             up += 1
         highest = max(highest, _limit_step(row))
     return _build_result(trade_date, "tushare.limit_list_ths", up, down, breaks, highest, "full", [])
+
+
+def _from_akshare_limit_pool(trade_date: str) -> dict[str, Any] | None:
+    ak = _load_akshare()
+    up_rows = _records(ak.stock_zt_pool_em(date=trade_date))
+    break_rows = _records(ak.stock_zt_pool_zbgc_em(date=trade_date))
+    down_rows = _records(ak.stock_zt_pool_dtgc_em(date=trade_date))
+    if not up_rows and not break_rows and not down_rows:
+        return None
+    highest = 0
+    for row in up_rows + break_rows:
+        highest = max(highest, _limit_step(row))
+    result = _build_result(
+        trade_date,
+        "akshare.stock_zt_pool_em+stock_zt_pool_zbgc_em+stock_zt_pool_dtgc_em",
+        len(up_rows),
+        len(down_rows),
+        len(break_rows),
+        highest,
+        "full",
+        [],
+    )
+    result["fallback_note"] = "Tushare 涨跌停情绪接口不可用时，使用 AkShare 东方财富涨停池、炸板池、跌停池公开数据兜底。"
+    return result
 
 
 def _from_stk_limit_daily(pro: Any, trade_date: str) -> dict[str, Any] | None:
@@ -278,7 +316,7 @@ def _limit_step(row: dict[str, Any]) -> int:
     tag_step = _limit_step_from_text(str(row.get("tag") or ""))
     if tag_step:
         return tag_step
-    for key in ["limit_times", "连板数", "high_days"]:
+    for key in ["limit_times", "连板数", "high_days", "连续跌停"]:
         value = _num(row.get(key))
         if value is not None:
             return int(value)
@@ -294,6 +332,9 @@ def _limit_step_from_text(text: str) -> int:
     if match:
         return int(match.group(1))
     match = re.search(r"(\d+)\s*连板", text)
+    if match:
+        return int(match.group(1))
+    match = re.search(r"(\d+)\s*/\s*\d+", text)
     return int(match.group(1)) if match else 0
 
 
@@ -301,9 +342,18 @@ def _num(value: Any) -> float | None:
     try:
         if value is None or value == "":
             return None
-        return float(value)
+        result = float(value)
+        if math.isnan(result):
+            return None
+        return result
     except (TypeError, ValueError):
         return None
+
+
+def _load_akshare():
+    import akshare as ak
+
+    return ak
 
 
 def _fmt_trade_date(value: str) -> str:
