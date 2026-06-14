@@ -253,6 +253,14 @@ class FakeDailyPro:
             ]
         )
 
+    def daily_basic(self, **kwargs):
+        return pd.DataFrame(
+            [
+                {"ts_code": kwargs["ts_code"], "trade_date": "20260601", "turnover_rate": 1.1, "turnover_rate_f": 1.2, "volume_ratio": 0.9, "total_mv": 1000, "circ_mv": 900},
+                {"ts_code": kwargs["ts_code"], "trade_date": "20260602", "turnover_rate": 1.3, "turnover_rate_f": 1.4, "volume_ratio": 1.1, "total_mv": 1100, "circ_mv": 990},
+            ]
+        )
+
 
 def test_fetch_daily_bars_merges_adj_factor_and_stk_limit():
     provider = TushareProvider.__new__(TushareProvider)

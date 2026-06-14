@@ -46,6 +46,15 @@ def render_report(pack: dict[str, Any], scorecard: dict[str, Any], position: dic
     ind = pack["indicators"]
     scores = scorecard["scores"]
     position_lines = _position_lines(quote, position)
+    position_volume_section = (
+        f"""
+## 持仓视角下的量价风险
+
+{_position_volume_price_lines(pack, position)}
+"""
+        if position
+        else ""
+    )
     return f"""# {display_name}中文多维研究报告
 
 ## 核心结论
@@ -54,8 +63,12 @@ def render_report(pack: dict[str, Any], scorecard: dict[str, Any], position: dic
 - **数据日期**：{trade_date}
 - **综合评级**：{scorecard["rating"]}
 - **综合分数**：{scores["total"]}/100
-- **主要结论**：{_summary(pack, scorecard)}
+- **综合判断**：{_summary(pack, scorecard)}
 - **评级说明**：{scorecard["rating_note"]}
+
+### 数据依据
+
+{_conclusion_basis_lines(pack, scorecard)}
 
 ## 数据状态
 
@@ -89,8 +102,7 @@ def render_report(pack: dict[str, Any], scorecard: dict[str, Any], position: dic
 
 ## 量价关系
 
-- **量能判断**：{_volume_text(ind)}
-- **风险解释**：放量下跌或缩量反弹都需要降低结论置信度。
+{_volume_price_lines(pack)}
 
 ## 基本面与估值
 
@@ -121,6 +133,7 @@ def render_report(pack: dict[str, Any], scorecard: dict[str, Any], position: dic
 ## 持仓风险快检
 
 {position_lines}
+{position_volume_section}
 
 ## 综合评分
 
@@ -450,6 +463,28 @@ def render_watchlist_report(results: list[dict[str, Any]]) -> str:
             f"- **第 {idx} 档 {_stock_display_name(item.get('pack') or {'meta': {'symbol': sc['symbol']}})}**：评级 {sc['rating']}，总分 {sc['scores']['total']}/100，交易日 {sc['trade_date']}，"
             f"20日涨跌幅 {ev.get('ret_20d_pct')}%，5日资金净流入 {ev.get('moneyflow_net_amount_5d')}，风险标记 {len(flags)} 个。"
         )
+    lines.extend(["", "## 量价强弱对比", ""])
+    lines.append("| 股票 | 量价结论 | 置信度 | 量价分 | 5日/20日量比 | 20日涨跌幅 | 主要信号 |")
+    lines.append("| --- | --- | --- | ---: | ---: | ---: | --- |")
+    for item in ranked:
+        pack = item.get("pack") or {}
+        vp = pack.get("volume_price") or {}
+        metrics = vp.get("metrics") or {}
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    _stock_display_name(pack or {"meta": {"symbol": item["scorecard"]["symbol"]}}),
+                    str(vp.get("verdict")),
+                    str(vp.get("confidence")),
+                    _score_cell(metrics.get("score")),
+                    str(metrics.get("volume_ratio_5_20")),
+                    str(metrics.get("price_change_20d")),
+                    "、".join((vp.get("signals") or [])[:3]) or "暂无",
+                ]
+            )
+            + " |"
+        )
     lines.extend(["", "## 风险提示", "", "- 观察池报告只做横向研究排序，不构成买入推荐。", "- 如需单票详细证据，请查看各股票目录下的 `report.md` 和 `market_pack.json`。"])
     return "\n".join(lines) + "\n"
 
@@ -478,11 +513,31 @@ def _stock_display_name(pack: dict[str, Any]) -> str:
 
 def _summary(pack: dict[str, Any], scorecard: dict[str, Any]) -> str:
     rating = scorecard["rating"]
-    if rating == "watch":
-        return "结构相对较好，可继续观察，但仍需等待数据和风险复核。"
-    if rating == "neutral":
-        return "多空证据不充分，适合保持中性观察，不宜基于单一信号行动。"
-    return "风险证据较多或趋势偏弱，应优先控制风险并等待结构改善。"
+    mapping = {
+        "strong_watch": "偏强，值得继续重点跟踪。",
+        "watch": "中性偏强，可继续观察。",
+        "neutral": "中性，等待确认。",
+        "cautious": "中性偏弱，短期进攻性不足。",
+        "avoid": "偏弱，应优先关注风险释放。",
+    }
+    return mapping.get(rating, "中性，等待确认。")
+
+
+def _conclusion_basis_lines(pack: dict[str, Any], scorecard: dict[str, Any]) -> str:
+    ind = pack.get("indicators") or {}
+    f = pack.get("fundamental") or {}
+    vp = pack.get("volume_price") or {}
+    metrics = vp.get("metrics") or {}
+    money = ((pack.get("moneyflow") or {}).get("latest") or {})
+    lines = [
+        f"- **趋势结构**：收盘价 {pack.get('quote', {}).get('close')}，MA20={ind.get('ma20')}，MA60={ind.get('ma60')}，20日涨跌幅={ind.get('ret_20d_pct')}%。",
+        f"- **量价关系**：结论 {vp.get('verdict')}，量价分={metrics.get('score')}，5日/20日量比={metrics.get('volume_ratio_5_20')}，20日涨跌幅={metrics.get('price_change_20d')}%。",
+        f"- **基本面质量**：营收同比={f.get('revenue_growth_yoy')}%，归母净利润同比={f.get('net_profit_growth_yoy')}%，资产负债率={f.get('asset_liability_ratio')}。",
+        f"- **估值位置**：PE TTM={f.get('pe_ttm')}，PB={f.get('pb')}。",
+    ]
+    if money:
+        lines.append(f"- **资金流**：当日净流入={money.get('net_amount')}，5日净流入={money.get('net_amount_5d')}。")
+    return "\n".join(lines[:5])
 
 
 def _ma_structure(pack: dict[str, Any]) -> str:
@@ -511,6 +566,45 @@ def _volume_text(ind: dict[str, Any]) -> str:
     if ratio < 0.7:
         return "近5日成交量低于20日均量，反弹或下跌的持续性需要观察。"
     return "近5日成交量接近20日均量，量能中性。"
+
+
+def _volume_price_lines(pack: dict[str, Any]) -> str:
+    vp = pack.get("volume_price") or {}
+    metrics = vp.get("metrics") or {}
+    signals = vp.get("signals") or []
+    risks = vp.get("risks") or []
+    basis = vp.get("data_basis") or []
+    return "\n".join(
+        [
+            f"- **量价结论**：{vp.get('verdict')}，置信度 {vp.get('confidence')}，量价分 {metrics.get('score')}/100。",
+            f"- **摘要**：{vp.get('summary')}",
+            f"- **核心指标**：5日/20日量比={metrics.get('volume_ratio_5_20')}，5日/20日成交额比={metrics.get('amount_ratio_5_20')}，换手率={metrics.get('turnover_latest')}，换手率 z-score={metrics.get('turnover_zscore')}。",
+            f"- **价格位置**：5日涨跌幅={metrics.get('price_change_5d')}%，20日涨跌幅={metrics.get('price_change_20d')}%，20日区间位置={metrics.get('close_position_in_range')}，量价相关={metrics.get('volume_price_corr_20d')}。",
+            f"- **K线结构**：上影线比例={metrics.get('upper_shadow_ratio')}，下影线比例={metrics.get('lower_shadow_ratio')}。",
+            f"- **识别信号**：{'、'.join(signals) if signals else '暂无强量价信号'}。",
+            f"- **量价风险**：{'；'.join(risks) if risks else '暂无突出的量价风险'}。",
+            f"- **数据依据**：{'；'.join(basis)}。",
+        ]
+    )
+
+
+def _position_volume_price_lines(pack: dict[str, Any], position: dict[str, Any] | None) -> str:
+    vp = pack.get("volume_price") or {}
+    signals = vp.get("signals") or []
+    risks = vp.get("risks") or []
+    if not position:
+        return "- **状态**：用户未提供持仓成本，本节只展示通用量价风险。"
+    cost = position.get("cost_price")
+    close = (pack.get("quote") or {}).get("close")
+    diff = round((close / cost - 1) * 100, 2) if cost and close else None
+    return "\n".join(
+        [
+            f"- **相对成本位置**：当前收盘价相对成本 {diff}%。",
+            f"- **量价结论**：{vp.get('verdict')}，置信度 {vp.get('confidence')}。",
+            f"- **对持仓的含义**：{'、'.join(signals[:3]) if signals else '暂无明确量价强化信号'}。",
+            f"- **需重点复核**：{'；'.join(risks) if risks else '暂无突出的量价风险'}。",
+        ]
+    )
 
 
 def _financial_text(pack: dict[str, Any]) -> str:

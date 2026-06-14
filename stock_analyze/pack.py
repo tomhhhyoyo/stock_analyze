@@ -8,6 +8,7 @@ from .announcements import enrich_announcements
 from .indicators import atr, bollinger, macd, max_drawdown, moving_average, pct_change, rsi, volatility
 from .models import AnalysisRequest
 from .symbols import lookup_name_by_symbol
+from .volume_price import analyze_volume_price
 
 SECOND_BATCH_RESERVED = ("fina_mainbz", "forecast", "express", "dividend", "disclosure_date")
 THIRD_BATCH_RESERVED = (
@@ -90,6 +91,9 @@ def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDat
     }
     fundamental = _build_fundamental(basic, financials)
     tushare_extensions = _build_tushare_extensions(financials)
+    daily_bar_rows = [bar.to_dict() for bar in bars]
+    volume_price = analyze_volume_price(daily_bar_rows, basic, moneyflow, market_sentiment, data_gaps)
+    data_gaps = sorted(set(data_gaps))
     return {
         "meta": {
             "contract_version": "1.2.0",
@@ -109,6 +113,7 @@ def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDat
                 "quote",
                 "daily_bars",
                 "indicators",
+                "volume_price",
                 "fundamental",
                 "moneyflow",
                 "market_context",
@@ -118,8 +123,9 @@ def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDat
             "staleness_rule": "trade_date 是行情交易日，as_of 是本地生成时间。",
         },
         "quote": quote,
-        "daily_bars": [bar.to_dict() for bar in bars],
+        "daily_bars": daily_bar_rows,
         "indicators": indicators,
+        "volume_price": volume_price,
         "fundamental": fundamental,
         "tushare_extensions": tushare_extensions,
         "announcements": announcements,
@@ -129,7 +135,7 @@ def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDat
         "data_gaps": data_gaps,
         "risk_flags": _risk_flags(basic, indicators, financials, moneyflow, market_context, announcements, last),
         "data_audit": _build_data_audit(
-            bars, indicators, financials, moneyflow, market_context, market_sentiment, announcements, data_gaps, tushare_extensions
+            bars, indicators, financials, moneyflow, market_context, market_sentiment, announcements, data_gaps, tushare_extensions, volume_price
         ),
         "trace": {
             "quote.close": "daily_bars[-1].close",
@@ -137,6 +143,7 @@ def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDat
             "indicators.ma20": "computed from daily_bars.qfq_close[-20:] with raw close fallback",
             "indicators.ma60": "computed from daily_bars.qfq_close[-60:] with raw close fallback",
             "indicators.vol_ratio_5_20": "vol_ma5 / vol_ma20",
+            "volume_price": "computed from daily_bars, daily_basic fields, moneyflow, stk_limit, market_sentiment",
             "fundamental": "provider.fetch_financials + provider.fetch_basic",
             "fundamental.balance_sheet": "provider.fetch_financials.balancesheet",
             "fundamental.cashflow": "provider.fetch_financials.cashflow",
@@ -155,6 +162,9 @@ def _build_fundamental(basic: dict[str, Any], financials: dict[str, Any]) -> dic
         "pb": basic.get("pb"),
         "market_cap": basic.get("market_cap"),
         "circ_market_cap": basic.get("circ_market_cap"),
+        "turnover_rate": basic.get("turnover_rate"),
+        "turnover_rate_f": basic.get("turnover_rate_f"),
+        "volume_ratio": basic.get("volume_ratio"),
         "roe": latest.get("roe") or basic.get("roe"),
         "roe_dt": latest.get("roe_dt"),
         "revenue": latest.get("revenue"),
@@ -296,6 +306,7 @@ def _build_data_audit(
     announcements: list[dict[str, Any]],
     data_gaps: list[str],
     tushare_extensions: dict[str, Any] | None = None,
+    volume_price: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     optional_missing = []
     if not market_sentiment or market_sentiment.get("data_quality") == "warning":
@@ -326,6 +337,8 @@ def _build_data_audit(
         "has_moneyflow": bool(moneyflow.get("latest")),
         "has_market_indices": bool(market_context.get("indices")),
         "has_market_sentiment": bool(market_sentiment) and market_sentiment.get("data_quality") != "warning",
+        "has_volume_price": bool(volume_price and (volume_price.get("metrics") or {}).get("score") is not None),
+        "volume_price_confidence": (volume_price or {}).get("confidence"),
         "announcements_count": len(announcements),
         "high_risk_announcements_count": sum(1 for item in announcements if item.get("risk_level") == "high"),
         "optional_fields_missing": optional_missing,

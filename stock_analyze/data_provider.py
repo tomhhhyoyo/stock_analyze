@@ -75,6 +75,7 @@ class TushareProvider:
         adj_by_date = self._fetch_adj_factor_map(symbol, start, end)
         latest_adj = _latest_adj_factor(adj_by_date)
         limit_by_date = self._fetch_stk_limit_map(symbol, start, end)
+        basic_by_date = self._fetch_daily_basic_map(symbol, start, end)
         bars: list[DailyBar] = []
         for row in df.to_dict("records"):
             trade_date = str(row["trade_date"])
@@ -82,6 +83,7 @@ class TushareProvider:
             adj_factor = adj_by_date.get(trade_date)
             qfq_ratio = adj_factor / latest_adj if adj_factor is not None and latest_adj else None
             limit = limit_by_date.get(trade_date) or {}
+            basic = basic_by_date.get(trade_date) or {}
             bars.append(
                 DailyBar(
                     date=_fmt_trade_date(trade_date),
@@ -100,12 +102,19 @@ class TushareProvider:
                     limit_down=limit.get("limit_down"),
                     pct_to_limit_up=_pct_to_limit_up(close, limit.get("limit_up")),
                     pct_to_limit_down=_pct_to_limit_down(close, limit.get("limit_down")),
+                    turnover_rate=basic.get("turnover_rate"),
+                    turnover_rate_f=basic.get("turnover_rate_f"),
+                    volume_ratio=basic.get("volume_ratio"),
+                    total_mv=basic.get("total_mv"),
+                    circ_mv=basic.get("circ_mv"),
                 )
             )
         if adj_by_date and len(adj_by_date) < len(bars):
             self._record_gap("adj_factor_partial_missing")
         if limit_by_date and len(limit_by_date) < len(bars):
             self._record_gap("stk_limit_partial_missing")
+        if basic_by_date and len(basic_by_date) < len(bars):
+            self._record_gap("daily_basic_partial_missing")
         return bars
 
     def _fetch_adj_factor_map(self, symbol: str, start: str, end: str) -> dict[str, float]:
@@ -148,8 +157,35 @@ class TushareProvider:
             }
         return result
 
+    def _fetch_daily_basic_map(self, symbol: str, start: str, end: str) -> dict[str, dict[str, float | None]]:
+        df = _safe_df(
+            lambda: self.pro.daily_basic(
+                ts_code=symbol,
+                start_date=start,
+                end_date=end,
+                fields="ts_code,trade_date,turnover_rate,turnover_rate_f,volume_ratio,total_mv,circ_mv,pe_ttm,pb",
+            ),
+            "daily_basic",
+            self._data_gaps,
+        )
+        if df is None or df.empty:
+            self._record_gap("daily_basic_empty_or_unavailable")
+            return {}
+        result: dict[str, dict[str, float | None]] = {}
+        for row in df.to_dict("records"):
+            result[str(row.get("trade_date"))] = {
+                "turnover_rate": _num(row.get("turnover_rate")),
+                "turnover_rate_f": _num(row.get("turnover_rate_f")),
+                "volume_ratio": _num(row.get("volume_ratio")),
+                "total_mv": _num(row.get("total_mv")),
+                "circ_mv": _num(row.get("circ_mv")),
+                "pe_ttm": _num(row.get("pe_ttm")),
+                "pb": _num(row.get("pb")),
+            }
+        return result
+
     def fetch_basic(self, symbol: str, trade_date: str | None = None) -> dict:
-        fields = "ts_code,trade_date,total_mv,circ_mv,pe_ttm,pb"
+        fields = "ts_code,trade_date,total_mv,circ_mv,pe_ttm,pb,turnover_rate,turnover_rate_f,volume_ratio"
         kwargs = {"ts_code": symbol, "fields": fields}
         if trade_date:
             kwargs["trade_date"] = trade_date.replace("-", "")
@@ -163,6 +199,9 @@ class TushareProvider:
             "pb": _num(row.get("pb")),
             "market_cap": _num(row.get("total_mv")),
             "circ_market_cap": _num(row.get("circ_mv")),
+            "turnover_rate": _num(row.get("turnover_rate")),
+            "turnover_rate_f": _num(row.get("turnover_rate_f")),
+            "volume_ratio": _num(row.get("volume_ratio")),
             "source": "tushare.daily_basic",
         }
 

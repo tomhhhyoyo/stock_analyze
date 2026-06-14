@@ -38,6 +38,7 @@ export TUSHARE_TOKEN=your_token
 - 日线行情：`daily`
 - 复权因子：`adj_factor`，与 `daily` 合并生成 `qfq_open`、`qfq_high`、`qfq_low`、`qfq_close`，技术指标优先使用前复权价格计算
 - 估值：`daily_basic`
+- 换手与流通市值：`daily_basic`，为量价模块补充 `turnover_rate`、`turnover_rate_f`、`volume_ratio`、`total_mv`、`circ_mv`
 - 财报：`fina_indicator`、`income`、`balancesheet`、`cashflow`
 - 公告：`anns_d`
 - 资金流：`moneyflow`
@@ -80,6 +81,7 @@ export TUSHARE_RETRY_DELAYS=2,5,10
 - `quote`
 - `daily_bars`
 - `indicators`
+- `volume_price`
 - `fundamental`
 - `tushare_extensions`
 - `announcements`
@@ -91,7 +93,7 @@ export TUSHARE_RETRY_DELAYS=2,5,10
 - `risk_flags`
 - `trace`
 
-`raw_data.json` 保存规范化后的原始数据快照，用于审计，不包含 token 或密钥。
+`raw_data.json` 只保存规范化后的原始数据快照，用于审计，不包含 token 或密钥；派生结论如 `volume_price` 只写入 `market_pack.json`。
 
 ## 使用
 
@@ -128,6 +130,7 @@ output/{中文名（symbol）}/report.html
 
 - `daily_bars`
 - `indicators`
+- `volume_price`
 - `fundamental`
 - `tushare_extensions`
 - `announcements`
@@ -144,6 +147,15 @@ output/{中文名（symbol）}/report.html
 ```text
 config/scoring_weights.json
 ```
+
+当前默认权重：
+
+- 趋势结构：25%
+- 量价关系：20%
+- 基本面质量：20%
+- 估值位置：15%
+- 资金流：10%
+- 风险事件：10%
 
 股票中文名映射不再依赖少量手工字典。程序真实运行时会先通过 Tushare `stock_basic` 拉取当前上市 A 股基础列表，并生成本地缓存：
 
@@ -182,9 +194,11 @@ output/watchlist_report.html
 
 只输出研究观察评级：
 
-- `watch`
-- `neutral`
-- `avoid`
+- `strong_watch`：偏强，重点跟踪
+- `watch`：中性偏强，继续观察
+- `neutral`：中性，等待确认
+- `cautious`：中性偏弱，谨慎观察
+- `avoid`：偏弱，优先规避风险
 
 不输出 `buy` / `sell` / 目标价。
 

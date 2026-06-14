@@ -6,15 +6,14 @@ from typing import Any
 
 DEFAULT_SCORING_CONFIG = {
     "weights": {
-        "trend": 0.3,
-        "volume_price": 0.15,
-        "fundamental": 0.15,
+        "trend": 0.25,
+        "volume_price": 0.2,
+        "fundamental": 0.2,
         "valuation": 0.15,
         "moneyflow": 0.1,
-        "market_context": 0.05,
         "risk": 0.1,
     },
-    "rating_thresholds": {"watch": 72, "neutral": 50},
+    "rating_thresholds": {"strong_watch": 78, "watch": 66, "neutral": 52, "cautious": 40},
     "risk_penalty_per_flag": 12,
     "gap_penalty": {"critical": 6, "warning": 3, "info": 1},
 }
@@ -27,7 +26,7 @@ def build_scorecard(pack: dict[str, Any]) -> dict[str, Any]:
     ind = pack["indicators"]
     risk_flags = pack.get("risk_flags", [])
     trend_score = _trend_score(quote, ind)
-    volume_score = _volume_score(ind)
+    volume_score = _volume_score(pack.get("volume_price") or {}, ind)
     fundamental_score = _fundamental_score(pack.get("fundamental") or {})
     valuation_score = _valuation_score(pack.get("fundamental") or {})
     moneyflow_score = _moneyflow_score(pack.get("moneyflow") or {})
@@ -46,12 +45,11 @@ def build_scorecard(pack: dict[str, Any]) -> dict[str, Any]:
         + fundamental_score * weights["fundamental"]
         + valuation_score * weights["valuation"]
         + moneyflow_score * weights["moneyflow"]
-        + market_score * weights["market_context"]
         + risk_score * weights["risk"],
         1,
     )
     thresholds = config.get("rating_thresholds") or {}
-    rating = "watch" if total >= thresholds.get("watch", 72) else "neutral" if total >= thresholds.get("neutral", 50) else "avoid"
+    rating = _rating(total, thresholds)
     return {
         "symbol": pack["meta"]["symbol"],
         "trade_date": pack["meta"]["trade_date"],
@@ -66,7 +64,7 @@ def build_scorecard(pack: dict[str, Any]) -> dict[str, Any]:
             "total": total,
         },
         "rating": rating,
-        "rating_note": "评级仅表示研究观察优先级，不代表买入或卖出建议。",
+        "rating_note": "评级仅表示个人投研跟踪优先级，不代表买入或卖出建议，也不包含目标价。",
         "scoring_config": config,
         "confidence": {
             "market_context": _market_confidence(market_sentiment),
@@ -89,7 +87,22 @@ def _trend_score(quote: dict[str, Any], ind: dict[str, Any]) -> int:
     return _clamp(score)
 
 
-def _volume_score(ind: dict[str, Any]) -> int:
+def _rating(total: float, thresholds: dict[str, Any]) -> str:
+    if total >= thresholds.get("strong_watch", 78):
+        return "strong_watch"
+    if total >= thresholds.get("watch", 66):
+        return "watch"
+    if total >= thresholds.get("neutral", 52):
+        return "neutral"
+    if total >= thresholds.get("cautious", 40):
+        return "cautious"
+    return "avoid"
+
+
+def _volume_score(volume_price: dict[str, Any], ind: dict[str, Any]) -> int:
+    score = ((volume_price.get("metrics") or {}).get("score"))
+    if score is not None:
+        return _clamp(float(score))
     ratio = ind.get("vol_ratio_5_20")
     ret20 = ind.get("ret_20d_pct")
     if ratio is None:
@@ -172,6 +185,8 @@ def _evidence(pack: dict[str, Any]) -> dict[str, Any]:
         "ma60": ind.get("ma60"),
         "ret_20d_pct": ind.get("ret_20d_pct"),
         "vol_ratio_5_20": ind.get("vol_ratio_5_20"),
+        "volume_price_verdict": (pack.get("volume_price") or {}).get("verdict"),
+        "volume_price_score": ((pack.get("volume_price") or {}).get("metrics") or {}).get("score"),
         "pe_ttm": (pack.get("fundamental") or {}).get("pe_ttm"),
         "pb": (pack.get("fundamental") or {}).get("pb"),
         "revenue_growth_yoy": (pack.get("fundamental") or {}).get("revenue_growth_yoy"),

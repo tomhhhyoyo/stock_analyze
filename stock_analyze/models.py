@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 Mode = Literal["single_stock_analysis", "position_check", "watchlist_review"]
 Horizon = Literal["short", "medium", "long"]
-Rating = Literal["watch", "neutral", "avoid"]
+Rating = Literal["strong_watch", "watch", "neutral", "cautious", "avoid"]
 
 
 @dataclass(frozen=True)
@@ -89,6 +89,11 @@ class DailyBar:
     limit_down: float | None = None
     pct_to_limit_up: float | None = None
     pct_to_limit_down: float | None = None
+    turnover_rate: float | None = None
+    turnover_rate_f: float | None = None
+    volume_ratio: float | None = None
+    total_mv: float | None = None
+    circ_mv: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -108,4 +113,9 @@ class DailyBar:
             "limit_down": self.limit_down,
             "pct_to_limit_up": self.pct_to_limit_up,
             "pct_to_limit_down": self.pct_to_limit_down,
+            "turnover_rate": self.turnover_rate,
+            "turnover_rate_f": self.turnover_rate_f,
+            "volume_ratio": self.volume_ratio,
+            "total_mv": self.total_mv,
+            "circ_mv": self.circ_mv,
         }

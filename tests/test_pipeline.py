@@ -67,7 +67,7 @@ def test_run_single_stock_analysis(tmp_path: Path):
     result = run_analysis("/股票 分析 600519.SH，最近两年", tmp_path, provider)
     output_dir = tmp_path / "贵州茅台（600519.SH）"
 
-    assert result["results"][0]["scorecard"]["rating"] in {"watch", "neutral", "avoid"}
+    assert result["results"][0]["scorecard"]["rating"] in {"strong_watch", "watch", "neutral", "cautious", "avoid"}
     assert result["results"][0]["report_path"].endswith("贵州茅台（600519.SH）/report.html")
     assert result["results"][0]["markdown_report_path"].endswith("贵州茅台（600519.SH）/report.md")
     assert (output_dir / "market_pack.json").exists()
@@ -84,6 +84,8 @@ def test_run_single_stock_analysis(tmp_path: Path):
     assert pack["announcements"][0]["title"] == "一季度报告"
     assert "data_contract" in pack
     assert "data_audit" in pack
+    assert "volume_price" in pack
+    assert pack["data_audit"]["has_volume_price"] is True
     assert pack["indicators"]["bollinger20"]["middle"] is not None
     assert pack["indicators"]["atr14"] is not None
     assert pack["indicators"]["max_drawdown60"] is not None
@@ -98,10 +100,14 @@ def test_run_single_stock_analysis(tmp_path: Path):
     assert "moneyflow" in raw
     assert "market_context" in raw
     assert "market_sentiment" in raw
+    assert "volume_price" not in raw
     report = (output_dir / "report.md").read_text(encoding="utf-8")
     assert "# 贵州茅台（600519.SH）中文多维研究报告" in report
     assert "**股票**：贵州茅台（600519.SH）" in report
     assert "资金流分析" in report
+    assert "综合判断" in report
+    assert "数据依据" in report
+    assert "量价关系" in report
     assert "公告与事件风险" in report
     assert "市场情绪与涨跌停结构" in report
     html = (output_dir / "report.html").read_text(encoding="utf-8")
@@ -149,6 +155,7 @@ def test_run_position_analysis(tmp_path: Path):
 
     text = (tmp_path / "贵州茅台（600519.SH）" / "position_report.md").read_text(encoding="utf-8")
     assert "相对成本" in text
+    assert "持仓视角下的量价风险" in text
     html = (tmp_path / "贵州茅台（600519.SH）" / "position_report.html").read_text(encoding="utf-8")
     assert "相对成本" in html
 
@@ -160,6 +167,7 @@ def test_run_watchlist_analysis(tmp_path: Path):
 
     text = (tmp_path / "watchlist_report.md").read_text(encoding="utf-8")
     assert "| 股票 | 评级 | 总分 | 趋势 | 量价 | 基本面 | 估值 | 资金流 | 市场环境 | 风险 | 数据质量 |" in text
+    assert "量价强弱对比" in text
     assert "贵州茅台（600519.SH）" in text
     assert "宁德时代（300750.SZ）" in text
     assert "不构成买入推荐" in text

@@ -74,6 +74,7 @@ description: 使用中文命令和自然语言输入，对用户指定的 A 股�
 - `quote`：最新日线行情。
 - `daily_bars`：日线原始序列，包含 `adj_factor`、前复权 `qfq_*` 和 `stk_limit` 涨跌停字段。
 - `indicators`：均线、MACD、RSI、布林带、ATR、波动率、回撤、量比等技术指标；价格类指标优先使用前复权价格计算。
+- `volume_price`：独立量价关系分析，包含结论、置信度、指标、信号、风险和数据依据。
 - `fundamental`：估值、财报、营收、利润、ROE、资产负债、现金流质量等。
 - `tushare_extensions`：新增接口实现状态，以及第二批、第三批 Tushare 字段预留。
 - `announcements`：公告列表和风险分类。
@@ -84,7 +85,7 @@ description: 使用中文命令和自然语言输入，对用户指定的 A 股�
 - `risk_flags`：自动风险标记。
 - `trace`：关键数值来源说明。
 
-`raw_data.json` 保存规范化后的原始数据快照，用于审计；不得包含 token、secret、cookie。
+`raw_data.json` 只保存规范化后的原始数据快照，用于审计；不得包含 token、secret、cookie，不保存派生分析结论。
 
 ## 数据缺口处理
 
@@ -99,7 +100,7 @@ description: 使用中文命令和自然语言输入，对用户指定的 A 股�
 ## 分析维度
 
 - 技术面：趋势、均线、MACD、RSI、布林带、ATR、波动率、回撤。
-- 量价：成交量均线、5日/20日量比、缩量反弹、放量下跌。
+- 量价：独立模块 `stock_analyze/volume_price.py`，使用 `daily`、`daily_basic`、`adj_factor`、`moneyflow`、`stk_limit`、`limit_list_d` 相关字段，输出放量上涨、缩量上涨、放量突破、高位放量滞涨、缩量回调等信号。
 - 基本面：营收、归母净利润、同比增速、ROE、毛利率。
 - 资产负债：资产负债率、货币资金、应收账款、存货、商誉、有息负债。
 - 现金流：经营现金流、投资现金流、筹资现金流、自由现金流、净现比。
@@ -166,9 +167,20 @@ output/{中文名（symbol）}/report.html
 
 允许输出：
 
-- `watch`：值得观察
-- `neutral`：中性
-- `avoid`：风险较高
+- `strong_watch`：偏强，重点跟踪
+- `watch`：中性偏强，继续观察
+- `neutral`：中性，等待确认
+- `cautious`：中性偏弱，谨慎观察
+- `avoid`：偏弱，优先规避风险
+
+默认评分权重：
+
+- 趋势结构：25%
+- 量价关系：20%
+- 基本面质量：20%
+- 估值位置：15%
+- 资金流：10%
+- 风险事件：10%
 
 禁止输出：
 
