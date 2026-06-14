@@ -8,6 +8,7 @@ from .io import write_json, write_text
 from .pack import build_market_pack
 from .parser import parse_user_request
 from .report import render_audit, render_dossier, render_html_document, render_report, render_watchlist_report
+from .regime_adjuster import apply_regime_adjustment
 from .scoring import build_scorecard
 from .symbols import ensure_symbol_cache
 
@@ -20,7 +21,7 @@ def run_analysis(text: str, out_dir: Path = Path("output"), provider: MarketData
     results: list[dict[str, Any]] = []
     for symbol in request.symbols:
         pack = build_market_pack(request, symbol, provider)
-        scorecard = build_scorecard(pack)
+        scorecard = apply_regime_adjustment(pack, build_scorecard(pack))
         symbol_dir = out_dir / _output_dir_name(pack)
         write_json(symbol_dir / "request.json", request.to_dict())
         write_json(symbol_dir / "raw_data.json", _build_raw_data(pack))
@@ -103,5 +104,7 @@ def _build_raw_data(pack: dict[str, Any]) -> dict[str, Any]:
         "moneyflow": pack.get("moneyflow") or {},
         "market_context": pack.get("market_context") or {},
         "market_sentiment": pack.get("market_sentiment") or {},
+        "market_regime": pack.get("market_regime") or {},
+        "sector_context": pack.get("sector_context") or {},
         "data_gaps": pack.get("data_gaps") or [],
     }

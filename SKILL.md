@@ -7,7 +7,7 @@ description: 使用中文命令和自然语言输入，对用户指定的 A 股�
 
 ## Skill 使命
 
-本 Skill 是中文 A 股多维研究工具。普通用户只通过“命令 + 自然语言”表达需求；CLI 脚本只是内部执行工具，不是普通用户主要入口。
+本 Skill 是中文 A 股个人投研工具，用于个人持仓分析、自选池筛选和单股研究。它不是自动荐股系统，也不做推荐结果复盘。普通用户只通过“命令 + 自然语言”表达需求；CLI 脚本只是内部执行工具，不是普通用户主要入口。
 
 本 Skill 不编造行情数据，不输出目标价，不输出直接买入、卖出、满仓、清仓等交易指令。所有数值结论必须来自 `output/{中文名（symbol）}/market_pack.json`；中文名缺失时才回退为 `output/{symbol}/market_pack.json`。
 
@@ -20,6 +20,7 @@ description: 使用中文命令和自然语言输入，对用户指定的 A 股�
 - `/观察池`：对用户提供的多只股票做横向观察和对比。
 
 禁止新增 `/技术`、`/风险`、`/公告`、`/复盘`、`/买入`、`/卖出` 等用户入口。技术面、风险、公告、财务等词只作为自然语言关注重点。
+禁止新增 `review/` 目录、5日/10日/20日收益复盘、`rating_accuracy`、`weekly_review.md`、`daily_review.json`。
 
 ## 输入格式
 
@@ -80,6 +81,8 @@ description: 使用中文命令和自然语言输入，对用户指定的 A 股�
 - `announcements`：公告列表和风险分类。
 - `moneyflow`：个股资金流。
 - `market_context`：宽基指数、行业指数状态、市场情绪。
+- `market_regime`：大盘周期、主要指数、市场情绪、北向资金缺口和评级闸门依据。
+- `sector_context`：所属板块、板块阶段、板块趋势、个股相对板块强弱。
 - `data_gaps`：缺失或失败的数据项。
 - `data_audit`：字段级审计状态。
 - `risk_flags`：自动风险标记。
@@ -90,6 +93,7 @@ description: 使用中文命令和自然语言输入，对用户指定的 A 股�
 ## 数据缺口处理
 
 - 生产分析必须先设置 `TUSHARE_TOKEN`；AkShare 不能作为无 token 启动路径。
+- 核心价格、成交量、估值、财务、资金流必须来自 Tushare；如缺失，必须写入 `data_gaps`，不允许用缺失数据推断结论。
 - Tushare 限频、超时、临时连接失败默认按 `TUSHARE_RETRY_DELAYS=1,3` 秒等待重试，可通过环境变量调整。
 - 权限不足、接口不存在不做无意义重试，必须尝试同源兜底、已设置 token 后的 AkShare 公开数据兜底或缓存。
 - 公告 `anns_d` 不可用时，优先用 AkShare `stock_individual_notice_report`，再用 `disclosure_date` 生成财报披露事件。
@@ -165,13 +169,15 @@ output/{中文名（symbol）}/report.html
 
 ## 评级限制
 
-允许输出：
+用户可见报告只允许输出中文评级：
 
-- `strong_watch`：明显偏强，重点跟踪
-- `watch`：偏强，继续观察
-- `neutral`：中性，等待确认
-- `cautious`：偏弱，谨慎观察
-- `avoid`：明显偏弱，优先规避风险
+- 偏强，重点跟踪
+- 中性偏强，继续观察
+- 中性，等待确认
+- 中性偏弱，谨慎观察
+- 偏弱，优先规避风险
+
+内部 `scorecard.json` 会保存 `rating_code` 和 `rating_label`，用户可见报告只展示中文 `rating_label`。
 
 默认评分权重：
 

@@ -46,6 +46,15 @@ def render_report(pack: dict[str, Any], scorecard: dict[str, Any], position: dic
     ind = pack["indicators"]
     scores = scorecard["scores"]
     position_lines = _position_lines(quote, position)
+    position_conclusion_section = (
+        f"""
+## 持仓结论
+
+{_position_conclusion_lines(pack, scorecard, position)}
+"""
+        if position
+        else ""
+    )
     position_status_section = (
         f"""
 ## 持仓状态判断
@@ -70,7 +79,7 @@ def render_report(pack: dict[str, Any], scorecard: dict[str, Any], position: dic
 
 - **股票**：{display_name}
 - **数据日期**：{trade_date}
-- **综合评级**：{scorecard["rating"]}
+- **综合评级**：{scorecard["rating_label"]}
 - **综合分数**：{scores["total"]}/100
 - **综合判断**：{_summary(pack, scorecard)}
 - **评级说明**：{scorecard["rating_note"]}
@@ -82,6 +91,7 @@ def render_report(pack: dict[str, Any], scorecard: dict[str, Any], position: dic
 ## 多空证据表
 
 {_evidence_table(scorecard)}
+{position_conclusion_section}
 
 ## 数据状态
 
@@ -89,6 +99,14 @@ def render_report(pack: dict[str, Any], scorecard: dict[str, Any], position: dic
 - **更新时间**：{pack["meta"]["as_of"]}
 - **数据限制**：{pack["meta"]["data_delay_note"]}
 - **追溯规则**：所有价格、成交量、均线和评分字段来自 `market_pack.json`。
+
+## 大盘环境
+
+{_market_regime_lines(pack, scorecard)}
+
+## 板块环境
+
+{_sector_context_lines(pack)}
 
 ## 关键证据
 
@@ -107,7 +125,7 @@ def render_report(pack: dict[str, Any], scorecard: dict[str, Any], position: dic
 - **距涨停/跌停**：{quote.get("pct_to_limit_up")}% / {quote.get("pct_to_limit_down")}%
 - **5日资金净流入**：{(pack.get("moneyflow") or {}).get("latest", {}).get("net_amount_5d")}
 
-## 技术面分析
+## 个股趋势
 
 - **均线结构**：{_ma_structure(pack)}
 - **趋势强弱**：{_trend_text(scorecard)}
@@ -116,6 +134,10 @@ def render_report(pack: dict[str, Any], scorecard: dict[str, Any], position: dic
 ## 量价关系
 
 {_volume_price_lines(pack)}
+
+## 分位值
+
+{_position_percentile_lines(pack)}
 
 ## 基本面与估值
 
@@ -166,8 +188,9 @@ def render_report(pack: dict[str, Any], scorecard: dict[str, Any], position: dic
 
 ## 观察条件
 
-- **转强条件**：价格重新站上关键中期均线，且量能不低于20日均量。
-- **转弱条件**：跌破近20日低点，或 MA20 继续低于 MA60 并扩大。
+- **升级条件**：大盘维持 risk_on 或中性以上，板块阶段改善，个股重新站上关键中期均线，且量价结论提升。
+- **降级条件**：大盘转弱、板块退潮、个股跌破近20日低点，或 MA20 继续低于 MA60 并扩大。
+- **观察失效条件**：放量下跌、资金流持续恶化、高风险公告或基本面恶化。
 - **复核条件**：公告、财报、减持、解禁、行业政策变化后应重新生成数据包。
 
 ## 数据局限
@@ -424,7 +447,7 @@ def render_dossier(pack: dict[str, Any], scorecard: dict[str, Any]) -> str:
 
 ## 结论
 
-- **评级**：{scorecard["rating"]}
+- **评级**：{scorecard.get("rating_label") or scorecard["rating"]}
 - **总分**：{scorecard["scores"]["total"]}/100
 - **解释**：{_summary(pack, scorecard)}
 
@@ -437,8 +460,35 @@ def render_dossier(pack: dict[str, Any], scorecard: dict[str, Any]) -> str:
 
 
 def render_watchlist_report(results: list[dict[str, Any]]) -> str:
-    lines = ["# 观察池对比报告", "", "## 观察优先级排序", ""]
+    lines = ["# 观察池对比报告", "", "## 大盘环境总览", ""]
     ranked = sorted(results, key=lambda item: item["scorecard"]["scores"]["total"], reverse=True)
+    if ranked:
+        lines.append(_market_regime_lines(ranked[0].get("pack") or {}, ranked[0].get("scorecard") or {}))
+    lines.extend(["", "## 板块强弱对比", ""])
+    lines.append("| 股票 | 所属板块 | 板块阶段 | 板块结论 | 个股相对板块 |")
+    lines.append("| --- | --- | --- | --- | --- |")
+    for item in ranked:
+        pack = item.get("pack") or {}
+        sector = pack.get("sector_context") or {}
+        rel = sector.get("relative_strength") or {}
+        lines.append(
+            f"| {_stock_display_name(pack)} | {sector.get('sector_name') or '未知'} | {sector.get('stage')} | {sector.get('verdict')} | {rel.get('excess_return_20d')}% |"
+        )
+    lines.extend(["", "## 自选池分层", ""])
+    lines.append("- **分层说明**：核心观察池 / 普通观察池 / 等待确认池 / 风险观察池 / 剔除池。")
+    lines.append("| 池子 | 股票 | 中文评级 | 所属板块 | 板块阶段 | 个股相对板块 | 量价结论 | 主要优势 | 主要风险 |")
+    lines.append("|---|---|---|---|---|---:|---|---|---|")
+    for item in ranked:
+        pack = item.get("pack") or {}
+        sc = item["scorecard"]
+        sector = pack.get("sector_context") or {}
+        rel = sector.get("relative_strength") or {}
+        vp = pack.get("volume_price") or {}
+        evidence = sc.get("evidence") or {}
+        lines.append(
+            f"| {_pool_name(sc.get('rating_code'))} | {_stock_display_name(pack)} | {sc.get('rating_label')} | {sector.get('sector_name') or '未知'} | {sector.get('stage')} | {rel.get('excess_return_20d')} | {vp.get('verdict')} | {'；'.join((evidence.get('bullish_evidence') or [])[:2]) or '暂无'} | {'；'.join((evidence.get('bearish_evidence') or [])[:2]) or '暂无'} |"
+        )
+    lines.extend(["", "## 观察优先级排序", ""])
     lines.append(
         "| 股票 | 评级 | 总分 | 趋势 | 量价 | 基本面 | 估值 | 资金流 | 市场环境 | 风险 | 数据质量 |"
     )
@@ -454,7 +504,7 @@ def render_watchlist_report(results: list[dict[str, Any]]) -> str:
             + " | ".join(
                 [
                     _stock_display_name(item.get("pack") or {"meta": {"symbol": sc["symbol"]}}),
-                    str(sc["rating"]),
+                    str(sc.get("rating_label")),
                     _score_cell(scores.get("total")),
                     _score_cell(scores.get("trend")),
                     _score_cell(scores.get("volume_price")),
@@ -481,7 +531,7 @@ def render_watchlist_report(results: list[dict[str, Any]]) -> str:
         ev = sc.get("evidence") or {}
         flags = sc.get("risk_flags") or []
         lines.append(
-            f"- **第 {idx} 档 {_stock_display_name(item.get('pack') or {'meta': {'symbol': sc['symbol']}})}**：评级 {sc['rating']}，总分 {sc['scores']['total']}/100，交易日 {sc['trade_date']}，"
+            f"- **第 {idx} 档 {_stock_display_name(item.get('pack') or {'meta': {'symbol': sc['symbol']}})}**：评级 {sc.get('rating_label')}，总分 {sc['scores']['total']}/100，交易日 {sc['trade_date']}，"
             f"20日涨跌幅 {ev.get('ret_20d_pct')}%，5日资金净流入 {ev.get('moneyflow_net_amount_5d')}，风险标记 {len(flags)} 个。"
         )
     lines.extend(["", "## 量价强弱对比", ""])
@@ -533,13 +583,13 @@ def _stock_display_name(pack: dict[str, Any]) -> str:
 
 
 def _summary(pack: dict[str, Any], scorecard: dict[str, Any]) -> str:
-    rating = scorecard["rating"]
+    rating = scorecard.get("rating_code") or scorecard.get("rating")
     mapping = {
-        "strong_watch": "明显偏强，重点跟踪。",
-        "watch": "偏强，继续观察。",
+        "strong_watch": "偏强，重点跟踪。",
+        "watch": "中性偏强，继续观察。",
         "neutral": "中性，等待确认。",
-        "cautious": "偏弱，谨慎观察。",
-        "avoid": "明显偏弱，优先规避风险。",
+        "cautious": "中性偏弱，谨慎观察。",
+        "avoid": "偏弱，优先规避风险。",
     }
     return mapping.get(rating, "中性，等待确认。")
 
@@ -575,7 +625,7 @@ def _evidence_table(scorecard: dict[str, Any]) -> str:
 
 
 def _watchlist_reason(scorecard: dict[str, Any], evidence: dict[str, Any]) -> str:
-    rating = scorecard.get("rating")
+    rating = scorecard.get("rating_code")
     bullish = evidence.get("bullish_evidence") or []
     bearish = evidence.get("bearish_evidence") or []
     if rating in {"strong_watch", "watch"}:
@@ -583,6 +633,71 @@ def _watchlist_reason(scorecard: dict[str, Any], evidence: dict[str, Any]) -> st
     if rating in {"cautious", "avoid"}:
         return f"优先级靠后，主要拖累为{'；'.join(bearish[:3]) or '风险项或分项评分偏弱'}。"
     return "维持中性观察，等待趋势、量价或基本面证据进一步确认。"
+
+
+def _pool_name(rating_code: str | None) -> str:
+    return {
+        "strong_watch": "核心观察池",
+        "watch": "普通观察池",
+        "neutral": "等待确认池",
+        "cautious": "风险观察池",
+        "avoid": "剔除池",
+    }.get(str(rating_code or "neutral"), "等待确认池")
+
+
+def _market_regime_lines(pack: dict[str, Any], scorecard: dict[str, Any] | None = None) -> str:
+    regime = pack.get("market_regime") or {}
+    if not regime:
+        return "- **大盘环境**：缺少大盘周期数据，已记录到数据缺口。"
+    sent = regime.get("sentiment") or {}
+    adjustments = (scorecard or {}).get("rating_adjustments") or []
+    impact = "；".join(item.get("message", "") for item in adjustments if "大盘" in item.get("message", "")) or "暂无大盘评级闸门影响。"
+    return "\n".join(
+        [
+            f"- **大盘周期**：{regime.get('verdict')}，阶段 {_market_stage_label(regime.get('stage'))}，分数 {regime.get('score')}/100，置信度 {regime.get('confidence')}。",
+            f"- **主要指数趋势**：上涨指数数={((regime.get('breadth') or {}).get('positive_indices'))}，下跌指数数={((regime.get('breadth') or {}).get('negative_indices'))}。",
+            "- **市场成交额**：当前缺少指数成交额历史，已在数据缺口中记录 `index_dailybasic_missing`。",
+            f"- **涨跌停情绪**：涨停数={sent.get('up_limit_count')}，跌停数={sent.get('down_limit_count')}，炸板数={sent.get('limit_break_count')}，炸板率={sent.get('limit_break_rate')}。",
+            f"- **北向资金**：接口不可用时记录 `moneyflow_hsgt_missing`，不影响主流程。",
+            f"- **大盘对评级的影响**：{impact}",
+        ]
+    )
+
+
+def _sector_context_lines(pack: dict[str, Any]) -> str:
+    sector = pack.get("sector_context") or {}
+    if not sector:
+        return "- **板块环境**：缺少板块上下文，已记录到数据缺口。"
+    trend = sector.get("sector_trend") or {}
+    rel = sector.get("relative_strength") or {}
+    sentiment = sector.get("sector_sentiment") or {}
+    return "\n".join(
+        [
+            f"- **所属行业/板块**：{sector.get('sector_name') or '未知'}（{sector.get('sector_code') or '未知'}）。",
+            f"- **板块阶段**：{sector.get('stage')}，结论 {sector.get('verdict')}，分数 {sector.get('score')}/100，置信度 {sector.get('confidence')}。",
+            f"- **板块趋势**：板块20日涨跌幅={trend.get('return_20d')}%，MA20/MA60 状态={trend.get('ma20_above_ma60')}。",
+            "- **板块成交额**：当前缺少板块成交额历史，缺失时只记录数据缺口，不做推断。",
+            f"- **板块情绪**：涨停数={sentiment.get('up_limit_count')}，跌停数={sentiment.get('down_limit_count')}，炸板数={sentiment.get('limit_break_count')}。",
+            f"- **个股 vs 板块相对强弱**：个股20日涨跌幅={rel.get('stock_return_20d')}%，板块20日涨跌幅={rel.get('sector_return_20d')}%，超额收益={rel.get('excess_return_20d')}%。",
+        ]
+    )
+
+
+def _market_stage_label(stage: Any) -> str:
+    return {"risk_on": "风险偏好较强", "neutral": "中性", "risk_off": "风险偏好较弱"}.get(str(stage or ""), str(stage or "未知"))
+
+
+def _position_percentile_lines(pack: dict[str, Any]) -> str:
+    sector = pack.get("sector_context") or {}
+    pos = sector.get("sector_position") or {}
+    ind = pack.get("indicators") or {}
+    return "\n".join(
+        [
+            f"- **20日区间**：高点={ind.get('high_20')}，低点={ind.get('low_20')}。",
+            f"- **60日区间**：高点={ind.get('high_60')}，低点={ind.get('low_60')}。",
+            f"- **板块120日/250日分位**：{pos.get('price_percentile_120d')} / {pos.get('price_percentile_250d')}。",
+        ]
+    )
 
 
 def _ma_structure(pack: dict[str, Any]) -> str:
@@ -672,8 +787,32 @@ def _position_status_lines(pack: dict[str, Any], scorecard: dict[str, Any], posi
     return "\n".join(
         [
             f"- **相对成本状态**：当前收盘价相对成本 {diff}%。",
-            f"- **综合评级约束**：{rating}，{_summary(pack, scorecard)}",
+            f"- **综合评级约束**：{scorecard.get('rating_label')}，{_summary(pack, scorecard)}",
             f"- **状态判断**：{state}",
+        ]
+    )
+
+
+def _position_conclusion_lines(pack: dict[str, Any], scorecard: dict[str, Any], position: dict[str, Any] | None) -> str:
+    rating_code = scorecard.get("rating_code")
+    status = {
+        "strong_watch": "可继续持有观察",
+        "watch": "可继续持有观察",
+        "neutral": "继续观察但不宜加大风险暴露",
+        "cautious": "风险升高，需要谨慎观察",
+        "avoid": "持仓逻辑减弱，建议降级观察",
+    }.get(str(rating_code or "neutral"), "继续观察但不宜加大风险暴露")
+    market = pack.get("market_regime") or {}
+    sector = pack.get("sector_context") or {}
+    vp = pack.get("volume_price") or {}
+    money = ((pack.get("moneyflow") or {}).get("latest") or {})
+    return "\n".join(
+        [
+            f"- **当前持仓评级**：{scorecard.get('rating_label')}。",
+            f"- **持仓状态**：{status}。",
+            f"- **继续观察依据**：大盘阶段={_market_stage_label(market.get('stage'))}，板块阶段={sector.get('stage')}，量价结论={vp.get('verdict')}，5日资金净流入={money.get('net_amount_5d')}。",
+            "- **风险触发条件**：大盘转弱；板块退潮；个股放量跌破 MA20；量价评级降为“中性偏弱，谨慎观察”；近 5 日资金持续净流出；高风险公告或基本面恶化。",
+            "- **观察失效条件**：大盘 risk_off；板块退潮；个股趋势破坏；放量下跌；资金流恶化；风险事件升级。",
         ]
     )
 

@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .ratings import rating_label
+
 DEFAULT_SCORING_CONFIG = {
     "weights": {
         "trend": 0.25,
@@ -63,7 +65,10 @@ def build_scorecard(pack: dict[str, Any]) -> dict[str, Any]:
             "risk": risk_score,
             "total": total,
         },
-        "rating": rating,
+        "rating_code": rating,
+        "rating_label": rating_label(rating),
+        "rating": rating_label(rating),
+        "rating_adjustments": [],
         "rating_note": "评级仅表示个人投研跟踪优先级，不代表买入或卖出建议，也不包含目标价。",
         "scoring_config": config,
         "confidence": {

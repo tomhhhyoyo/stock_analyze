@@ -97,7 +97,6 @@ def _parse_focus(text: str) -> list[str]:
         "行业环境",
         "事件",
         "趋势",
-        "复盘",
     ]
     return [word for word in focus_words if word in text]
 

@@ -1,3 +1,4 @@
+from stock_analyze.regime_adjuster import apply_regime_adjustment
 from stock_analyze.scoring import _rating, build_scorecard, load_scoring_config
 
 
@@ -48,7 +49,8 @@ def _pack(
 def test_rating_can_upgrade_from_neutral_to_watch_or_strong_watch():
     scorecard = build_scorecard(_pack())
 
-    assert scorecard["rating"] in {"watch", "strong_watch"}
+    assert scorecard["rating_code"] in {"watch", "strong_watch"}
+    assert scorecard["rating"] == scorecard["rating_label"]
     assert scorecard["scores"]["volume_price"] == 80
     assert scorecard["evidence"]["volume_price_signals"] == ["放量突破"]
     assert scorecard["evidence"]["volume_price_risks"] == ["换手率显著高于 20 日均值"]
@@ -75,7 +77,7 @@ def test_rating_can_downgrade_from_neutral_to_cautious_or_avoid():
         )
     )
 
-    assert scorecard["rating"] in {"cautious", "avoid"}
+    assert scorecard["rating_code"] in {"cautious", "avoid"}
 
 
 def test_five_rating_outputs_are_supported():
@@ -86,3 +88,46 @@ def test_five_rating_outputs_are_supported():
     assert _rating(55, thresholds) == "neutral"
     assert _rating(45, thresholds) == "cautious"
     assert _rating(35, thresholds) == "avoid"
+
+
+def test_market_risk_off_caps_visible_rating_to_watch():
+    pack = _pack()
+    pack["market_regime"] = {
+        "stage": "risk_off",
+        "sentiment": {"up_limit_count": 3, "down_limit_count": 8},
+    }
+    pack["sector_context"] = {"stage": "修复", "relative_strength": {}}
+
+    scorecard = apply_regime_adjustment(pack, build_scorecard(pack))
+
+    assert scorecard["rating_code"] in {"neutral", "watch", "cautious", "avoid"}
+    assert scorecard["rating_label"] != "偏强，重点跟踪"
+    assert scorecard["rating"] == scorecard["rating_label"]
+    assert scorecard["rating_adjustments"]
+
+
+def test_sector_fade_and_volume_stall_downgrades_rating():
+    pack = _pack(volume_score=72)
+    pack["volume_price"]["signals"] = ["高位放量滞涨"]
+    pack["market_regime"] = {"stage": "neutral", "sentiment": {"up_limit_count": 10, "down_limit_count": 5}}
+    pack["sector_context"] = {"stage": "退潮", "relative_strength": {"outperformed_sector": False, "underperformed_sector": False}}
+
+    scorecard = apply_regime_adjustment(pack, build_scorecard(pack))
+
+    assert scorecard["rating_code"] in {"cautious", "neutral", "avoid"}
+    assert any("板块退潮" in item["message"] for item in scorecard["rating_adjustments"])
+
+
+def test_relative_strength_updates_evidence():
+    pack = _pack()
+    pack["market_regime"] = {"stage": "neutral", "sentiment": {"up_limit_count": 10, "down_limit_count": 5}}
+    pack["sector_context"] = {"stage": "修复", "relative_strength": {"outperformed_sector": True, "underperformed_sector": False}}
+
+    scorecard = apply_regime_adjustment(pack, build_scorecard(pack))
+
+    assert "个股明显跑赢所属板块，具备相对强势" in scorecard["bullish_evidence"]
+
+    pack["sector_context"] = {"stage": "修复", "relative_strength": {"outperformed_sector": False, "underperformed_sector": True}}
+    scorecard = apply_regime_adjustment(pack, build_scorecard(pack))
+
+    assert "个股明显跑输所属板块，弱于行业表现" in scorecard["bearish_evidence"]

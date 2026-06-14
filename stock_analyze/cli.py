@@ -30,7 +30,7 @@ def _summary(result: dict) -> str:
         display_name = f"{name}（{sc['symbol']}）" if name else sc["symbol"]
         lines.append(f"- **股票**：{display_name}")
         lines.append(f"- **数据日期**：{sc['trade_date']}")
-        lines.append(f"- **综合评级**：{sc['rating']}")
+        lines.append(f"- **综合评级**：{sc.get('rating_label') or sc['rating']}")
         lines.append(f"- **综合分数**：{sc['scores']['total']}/100")
         lines.append(f"- **详细报告**：`{item['report_path']}`")
         lines.append("")

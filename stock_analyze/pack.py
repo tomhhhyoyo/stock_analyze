@@ -6,7 +6,9 @@ from typing import Any
 from .data_provider import MarketDataProvider
 from .announcements import enrich_announcements
 from .indicators import atr, bollinger, macd, max_drawdown, moving_average, pct_change, rsi, volatility
+from .market_regime import analyze_market_regime
 from .models import AnalysisRequest
+from .sector_context import analyze_sector_context
 from .symbols import lookup_name_by_symbol
 from .volume_price import analyze_volume_price
 
@@ -93,6 +95,8 @@ def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDat
     tushare_extensions = _build_tushare_extensions(financials)
     daily_bar_rows = [bar.to_dict() for bar in bars]
     volume_price = analyze_volume_price(daily_bar_rows, basic, moneyflow, market_sentiment, data_gaps)
+    market_regime = analyze_market_regime(market_context, market_sentiment, data_gaps)
+    sector_context = analyze_sector_context(market_context, daily_bar_rows, indicators, data_gaps)
     data_gaps = sorted(set(data_gaps))
     return {
         "meta": {
@@ -118,6 +122,8 @@ def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDat
                 "moneyflow",
                 "market_context",
                 "market_sentiment",
+                "market_regime",
+                "sector_context",
             ],
             "numeric_source_rule": "所有数值结论必须来自 market_pack.json，不允许模型记忆补数。",
             "staleness_rule": "trade_date 是行情交易日，as_of 是本地生成时间。",
@@ -132,10 +138,23 @@ def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDat
         "moneyflow": moneyflow,
         "market_context": market_context,
         "market_sentiment": market_sentiment,
+        "market_regime": market_regime,
+        "sector_context": sector_context,
         "data_gaps": data_gaps,
         "risk_flags": _risk_flags(basic, indicators, financials, moneyflow, market_context, announcements, last),
         "data_audit": _build_data_audit(
-            bars, indicators, financials, moneyflow, market_context, market_sentiment, announcements, data_gaps, tushare_extensions, volume_price
+            bars,
+            indicators,
+            financials,
+            moneyflow,
+            market_context,
+            market_sentiment,
+            announcements,
+            data_gaps,
+            tushare_extensions,
+            volume_price,
+            market_regime,
+            sector_context,
         ),
         "trace": {
             "quote.close": "daily_bars[-1].close",
@@ -151,6 +170,8 @@ def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDat
             "announcements": "provider.fetch_announcements",
             "moneyflow": "provider.fetch_moneyflow",
             "market_context": "provider.fetch_market_context",
+            "market_regime": "computed from market_context.indices, market_sentiment, optional index_dailybasic and moneyflow_hsgt gaps",
+            "sector_context": "computed from market_context.industry and stock daily_bars relative strength",
         },
     }
 
@@ -307,6 +328,8 @@ def _build_data_audit(
     data_gaps: list[str],
     tushare_extensions: dict[str, Any] | None = None,
     volume_price: dict[str, Any] | None = None,
+    market_regime: dict[str, Any] | None = None,
+    sector_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     optional_missing = []
     if not market_sentiment or market_sentiment.get("data_quality") == "warning":
@@ -339,6 +362,10 @@ def _build_data_audit(
         "has_market_sentiment": bool(market_sentiment) and market_sentiment.get("data_quality") != "warning",
         "has_volume_price": bool(volume_price and (volume_price.get("metrics") or {}).get("score") is not None),
         "volume_price_confidence": (volume_price or {}).get("confidence"),
+        "has_market_regime": bool(market_regime and market_regime.get("score") is not None),
+        "has_sector_context": bool(sector_context and sector_context.get("score") is not None),
+        "market_regime_confidence": (market_regime or {}).get("confidence"),
+        "sector_context_confidence": (sector_context or {}).get("confidence"),
         "announcements_count": len(announcements),
         "high_risk_announcements_count": sum(1 for item in announcements if item.get("risk_level") == "high"),
         "optional_fields_missing": optional_missing,

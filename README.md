@@ -1,12 +1,13 @@
 # stock-analyze
 
-中文 A 股多维研究 Skill。用户只需要使用 3 个命令：
+中文 A 股个人投研工具，用于个人持仓分析、自选池筛选和单股研究；不是自动荐股系统，也不做推荐结果复盘。用户只需要使用 3 个命令：
 
 - `/股票`
 - `/持仓`
 - `/观察池`
 
 项目会生成结构化数据包、评分、审计、证据链和中文报告。所有数值结论都必须来自 `market_pack.json`。
+不会新增 `/复盘`、`/买入`、`/卖出`、`/荐股`、`/止损`、`/目标价` 等命令，也不会生成 `review/` 目录、5日/10日/20日收益复盘、`rating_accuracy`、`weekly_review.md` 或 `daily_review.json`。
 
 普通用户入口保持只有三个：
 
@@ -51,7 +52,7 @@ Tushare 主数据包括：
 - 市场情绪：优先 `limit_list_d`，降级 `limit_list_ths`，再降级 `stk_limit` + `daily` 近似计算
 - 股票名称映射：`stock_basic`
 
-只有在 `TUSHARE_TOKEN` 已设置、Tushare 主流程已启动后，若个别接口因权限不足或接口覆盖问题不可用，项目才会尝试 AkShare 公开数据作为兜底，并在 `market_pack.json` 中明确写入 `source=akshare.*`：
+核心价格、成交量、估值、财务、资金流必须来自 Tushare；如缺失，必须写入 `data_gaps`，不允许用缺失数据推断结论。只有在 `TUSHARE_TOKEN` 已设置、Tushare 主流程已启动后，若公告、行业指数、涨跌停情绪等非核心字段因权限不足或接口覆盖问题不可用，项目才会尝试 AkShare 公开数据作为兜底，并在 `market_pack.json` 中明确写入 `source=akshare.*`：
 
 - 公告兜底：AkShare `stock_individual_notice_report`
 - 申万行业指数兜底：AkShare `index_hist_sw`
@@ -91,6 +92,8 @@ export TUSHARE_RETRY_DELAYS=2,5,10
 - `moneyflow`
 - `market_context`
 - `market_sentiment`
+- `market_regime`
+- `sector_context`
 - `data_gaps`
 - `data_audit`
 - `risk_flags`
@@ -139,6 +142,8 @@ output/{中文名（symbol）}/report.html
 - `announcements`
 - `moneyflow`
 - `market_context`
+- `market_regime`
+- `sector_context`
 - `data_gaps`
 - `data_audit`
 - `risk_flags`
@@ -195,15 +200,17 @@ output/watchlist_report.html
 
 ## 评级
 
-只输出研究观察评级：
+用户可见报告只输出中文研究观察评级：
 
-- `strong_watch`：明显偏强，重点跟踪
-- `watch`：偏强，继续观察
-- `neutral`：中性，等待确认
-- `cautious`：偏弱，谨慎观察
-- `avoid`：明显偏弱，优先规避风险
+- 偏强，重点跟踪
+- 中性偏强，继续观察
+- 中性，等待确认
+- 中性偏弱，谨慎观察
+- 偏弱，优先规避风险
 
-不输出 `buy` / `sell` / 目标价。
+内部 `scorecard.json` 会保存 `rating_code` 和 `rating_label`，用户可见报告只展示中文 `rating_label`。
+
+不输出 `buy` / `sell` / 买入 / 卖出 / 加仓 / 清仓 / 目标价 / 无条件止损价。
 
 ## 测试
 
