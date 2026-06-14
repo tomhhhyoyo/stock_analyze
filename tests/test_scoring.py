@@ -1,4 +1,4 @@
-from stock_analyze.scoring import build_scorecard, load_scoring_config
+from stock_analyze.scoring import _rating, build_scorecard, load_scoring_config
 
 
 def test_load_scoring_config():
@@ -29,7 +29,7 @@ def _pack(
         "meta": {"symbol": "600519.SH", "trade_date": "2026-06-12"},
         "quote": {"close": close},
         "indicators": {"ma5": ma, "ma10": ma, "ma20": ma, "ma60": ma, "ma120": ma, "ret_20d_pct": ret20, "vol_ratio_5_20": 1.2},
-        "volume_price": {"verdict": "偏强", "metrics": {"score": volume_score}},
+        "volume_price": {"verdict": "偏强", "metrics": {"score": volume_score}, "signals": ["放量突破"], "risks": ["换手率显著高于 20 日均值"]},
         "fundamental": {
             "revenue_growth_yoy": revenue_growth,
             "net_profit_growth_yoy": profit_growth,
@@ -50,6 +50,11 @@ def test_rating_can_upgrade_from_neutral_to_watch_or_strong_watch():
 
     assert scorecard["rating"] in {"watch", "strong_watch"}
     assert scorecard["scores"]["volume_price"] == 80
+    assert scorecard["evidence"]["volume_price_signals"] == ["放量突破"]
+    assert scorecard["evidence"]["volume_price_risks"] == ["换手率显著高于 20 日均值"]
+    assert "bullish_evidence" in scorecard["evidence"]
+    assert "bearish_evidence" in scorecard["evidence"]
+    assert "neutral_evidence" in scorecard["evidence"]
 
 
 def test_rating_can_downgrade_from_neutral_to_cautious_or_avoid():
@@ -71,3 +76,13 @@ def test_rating_can_downgrade_from_neutral_to_cautious_or_avoid():
     )
 
     assert scorecard["rating"] in {"cautious", "avoid"}
+
+
+def test_five_rating_outputs_are_supported():
+    thresholds = {"strong_watch": 78, "watch": 66, "neutral": 52, "cautious": 40}
+
+    assert _rating(80, thresholds) == "strong_watch"
+    assert _rating(70, thresholds) == "watch"
+    assert _rating(55, thresholds) == "neutral"
+    assert _rating(45, thresholds) == "cautious"
+    assert _rating(35, thresholds) == "avoid"

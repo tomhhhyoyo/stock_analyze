@@ -94,19 +94,23 @@ def test_run_single_stock_analysis(tmp_path: Path):
     assert raw["provider"] == "static"
     assert raw["generated_at"]
     assert raw["meta"]["name"] == "贵州茅台"
+    assert "daily" in raw
+    assert "daily_basic" in raw
     assert "basic" in raw
     assert "financials" in raw
+    assert "volume_price" in raw
     assert "announcements" in raw
     assert "moneyflow" in raw
     assert "market_context" in raw
     assert "market_sentiment" in raw
-    assert "volume_price" not in raw
     report = (output_dir / "report.md").read_text(encoding="utf-8")
     assert "# 贵州茅台（600519.SH）中文多维研究报告" in report
     assert "**股票**：贵州茅台（600519.SH）" in report
     assert "资金流分析" in report
     assert "综合判断" in report
     assert "数据依据" in report
+    assert "多空证据表" in report
+    assert "bullish_evidence" in report
     assert "量价关系" in report
     assert "公告与事件风险" in report
     assert "市场情绪与涨跌停结构" in report
@@ -155,6 +159,7 @@ def test_run_position_analysis(tmp_path: Path):
 
     text = (tmp_path / "贵州茅台（600519.SH）" / "position_report.md").read_text(encoding="utf-8")
     assert "相对成本" in text
+    assert "持仓状态判断" in text
     assert "持仓视角下的量价风险" in text
     html = (tmp_path / "贵州茅台（600519.SH）" / "position_report.html").read_text(encoding="utf-8")
     assert "相对成本" in html
@@ -166,7 +171,9 @@ def test_run_watchlist_analysis(tmp_path: Path):
     run_analysis("/观察池 600519.SH、300750.SZ，做多维对比", tmp_path, provider)
 
     text = (tmp_path / "watchlist_report.md").read_text(encoding="utf-8")
+    assert "观察优先级排序" in text
     assert "| 股票 | 评级 | 总分 | 趋势 | 量价 | 基本面 | 估值 | 资金流 | 市场环境 | 风险 | 数据质量 |" in text
+    assert "升级/降级理由" in text
     assert "量价强弱对比" in text
     assert "贵州茅台（600519.SH）" in text
     assert "宁德时代（300750.SZ）" in text
@@ -282,3 +289,17 @@ def test_default_provider_requires_tushare_token(monkeypatch):
 
     with pytest.raises(RuntimeError, match="AkShare 只能作为 Tushare 权限不足后的兜底源"):
         default_provider()
+
+
+def test_readme_and_skill_rating_and_fallback_contract_are_consistent():
+    readme = Path("README.md").read_text(encoding="utf-8")
+    skill = Path("SKILL.md").read_text(encoding="utf-8")
+    combined = readme + "\n" + skill
+
+    assert "当前数据全部通过 Tushare 获取" not in combined
+    assert "strong_watch`：明显偏强，重点跟踪" in combined
+    assert "watch`：偏强，继续观察" in combined
+    assert "cautious`：偏弱，谨慎观察" in combined
+    assert "avoid`：明显偏弱，优先规避风险" in combined
+    assert "TUSHARE_TOKEN" in combined
+    assert "AkShare 仅作为" in readme

@@ -85,13 +85,13 @@ description: 使用中文命令和自然语言输入，对用户指定的 A 股�
 - `risk_flags`：自动风险标记。
 - `trace`：关键数值来源说明。
 
-`raw_data.json` 只保存规范化后的原始数据快照，用于审计；不得包含 token、secret、cookie，不保存派生分析结论。
+`raw_data.json` 保存规范化后的原始数据快照，用于审计；不得包含 token、secret、cookie；包含 `daily`、`daily_basic`、`financials`、`moneyflow`、`market_context`、`market_sentiment`、`volume_price` 的当次快照。
 
 ## 数据缺口处理
 
 - 生产分析必须先设置 `TUSHARE_TOKEN`；AkShare 不能作为无 token 启动路径。
 - Tushare 限频、超时、临时连接失败默认按 `TUSHARE_RETRY_DELAYS=1,3` 秒等待重试，可通过环境变量调整。
-- 权限不足、接口不存在不做无意义重试，必须尝试同源兜底、AkShare 公开数据兜底或缓存。
+- 权限不足、接口不存在不做无意义重试，必须尝试同源兜底、已设置 token 后的 AkShare 公开数据兜底或缓存。
 - 公告 `anns_d` 不可用时，优先用 AkShare `stock_individual_notice_report`，再用 `disclosure_date` 生成财报披露事件。
 - 行业指数 `sw_daily` 不可用时，优先尝试 `index_daily`，再尝试 AkShare `index_hist_sw` 和本地历史缓存。
 - 使用 AkShare 兜底时必须在 `market_pack.json` 写明 `source=akshare.*`，报告数值仍只能来自 `market_pack.json`。
@@ -167,11 +167,11 @@ output/{中文名（symbol）}/report.html
 
 允许输出：
 
-- `strong_watch`：偏强，重点跟踪
-- `watch`：中性偏强，继续观察
+- `strong_watch`：明显偏强，重点跟踪
+- `watch`：偏强，继续观察
 - `neutral`：中性，等待确认
-- `cautious`：中性偏弱，谨慎观察
-- `avoid`：偏弱，优先规避风险
+- `cautious`：偏弱，谨慎观察
+- `avoid`：明显偏弱，优先规避风险
 
 默认评分权重：
 

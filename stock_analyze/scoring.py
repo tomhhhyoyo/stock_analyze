@@ -179,19 +179,58 @@ def _market_confidence(market_sentiment: dict[str, Any]) -> str:
 def _evidence(pack: dict[str, Any]) -> dict[str, Any]:
     ind = pack["indicators"]
     quote = pack["quote"]
+    volume_price = pack.get("volume_price") or {}
+    volume_metrics = volume_price.get("metrics") or {}
+    moneyflow_latest = ((pack.get("moneyflow") or {}).get("latest") or {})
+    fundamental = pack.get("fundamental") or {}
+    risk_flags = pack.get("risk_flags") or []
+    bullish: list[str] = []
+    bearish: list[str] = []
+    neutral: list[str] = []
+    close = quote.get("close")
+    ma20 = ind.get("ma20")
+    ma60 = ind.get("ma60")
+    ret20 = ind.get("ret_20d_pct")
+    volume_score = volume_metrics.get("score")
+    if close is not None and ma20 is not None:
+        (bullish if close >= ma20 else bearish).append(f"收盘价={close}，MA20={ma20}")
+    if ma20 is not None and ma60 is not None:
+        (bullish if ma20 >= ma60 else bearish).append(f"MA20={ma20}，MA60={ma60}")
+    if ret20 is not None:
+        (bullish if ret20 > 3 else bearish if ret20 < -3 else neutral).append(f"20日涨跌幅={ret20}%")
+    if volume_score is not None:
+        (bullish if volume_score >= 65 else bearish if volume_score < 45 else neutral).append(
+            f"量价分={volume_score}，量价结论={volume_price.get('verdict')}"
+        )
+    revenue_growth = fundamental.get("revenue_growth_yoy")
+    profit_growth = fundamental.get("net_profit_growth_yoy")
+    if revenue_growth is not None:
+        (bullish if revenue_growth > 0 else bearish).append(f"营收同比={revenue_growth}%")
+    if profit_growth is not None:
+        (bullish if profit_growth > 0 else bearish).append(f"归母净利润同比={profit_growth}%")
+    net_5d = moneyflow_latest.get("net_amount_5d")
+    if net_5d is not None:
+        (bullish if net_5d > 0 else bearish if net_5d < 0 else neutral).append(f"5日资金净流入={net_5d}")
+    if risk_flags:
+        bearish.append(f"风险标记数量={len(risk_flags)}")
     return {
         "close": quote.get("close"),
         "ma20": ind.get("ma20"),
         "ma60": ind.get("ma60"),
         "ret_20d_pct": ind.get("ret_20d_pct"),
         "vol_ratio_5_20": ind.get("vol_ratio_5_20"),
-        "volume_price_verdict": (pack.get("volume_price") or {}).get("verdict"),
-        "volume_price_score": ((pack.get("volume_price") or {}).get("metrics") or {}).get("score"),
-        "pe_ttm": (pack.get("fundamental") or {}).get("pe_ttm"),
-        "pb": (pack.get("fundamental") or {}).get("pb"),
-        "revenue_growth_yoy": (pack.get("fundamental") or {}).get("revenue_growth_yoy"),
-        "net_profit_growth_yoy": (pack.get("fundamental") or {}).get("net_profit_growth_yoy"),
-        "moneyflow_net_amount_5d": ((pack.get("moneyflow") or {}).get("latest") or {}).get("net_amount_5d"),
+        "volume_price_verdict": volume_price.get("verdict"),
+        "volume_price_score": volume_metrics.get("score"),
+        "volume_price_signals": volume_price.get("signals") or [],
+        "volume_price_risks": volume_price.get("risks") or [],
+        "pe_ttm": fundamental.get("pe_ttm"),
+        "pb": fundamental.get("pb"),
+        "revenue_growth_yoy": fundamental.get("revenue_growth_yoy"),
+        "net_profit_growth_yoy": fundamental.get("net_profit_growth_yoy"),
+        "moneyflow_net_amount_5d": moneyflow_latest.get("net_amount_5d"),
+        "bullish_evidence": bullish[:6],
+        "bearish_evidence": bearish[:6],
+        "neutral_evidence": neutral[:6],
     }
 
 

@@ -46,6 +46,15 @@ def render_report(pack: dict[str, Any], scorecard: dict[str, Any], position: dic
     ind = pack["indicators"]
     scores = scorecard["scores"]
     position_lines = _position_lines(quote, position)
+    position_status_section = (
+        f"""
+## 持仓状态判断
+
+{_position_status_lines(pack, scorecard, position)}
+"""
+        if position
+        else ""
+    )
     position_volume_section = (
         f"""
 ## 持仓视角下的量价风险
@@ -69,6 +78,10 @@ def render_report(pack: dict[str, Any], scorecard: dict[str, Any], position: dic
 ### 数据依据
 
 {_conclusion_basis_lines(pack, scorecard)}
+
+## 多空证据表
+
+{_evidence_table(scorecard)}
 
 ## 数据状态
 
@@ -133,6 +146,7 @@ def render_report(pack: dict[str, Any], scorecard: dict[str, Any], position: dic
 ## 持仓风险快检
 
 {position_lines}
+{position_status_section}
 {position_volume_section}
 
 ## 综合评分
@@ -423,7 +437,7 @@ def render_dossier(pack: dict[str, Any], scorecard: dict[str, Any]) -> str:
 
 
 def render_watchlist_report(results: list[dict[str, Any]]) -> str:
-    lines = ["# 观察池对比报告", "", "## 横向对比", ""]
+    lines = ["# 观察池对比报告", "", "## 观察优先级排序", ""]
     ranked = sorted(results, key=lambda item: item["scorecard"]["scores"]["total"], reverse=True)
     lines.append(
         "| 股票 | 评级 | 总分 | 趋势 | 量价 | 基本面 | 估值 | 资金流 | 市场环境 | 风险 | 数据质量 |"
@@ -453,6 +467,13 @@ def render_watchlist_report(results: list[dict[str, Any]]) -> str:
                 ]
             )
             + " |"
+        )
+    lines.extend(["", "## 升级/降级理由", ""])
+    for idx, item in enumerate(ranked, 1):
+        sc = item["scorecard"]
+        ev = sc.get("evidence") or {}
+        lines.append(
+            f"- **第 {idx} 位 {_stock_display_name(item.get('pack') or {'meta': {'symbol': sc['symbol']}})}**：{_watchlist_reason(sc, ev)}"
         )
     lines.extend(["", "## 核心结论", ""])
     for idx, item in enumerate(ranked, 1):
@@ -514,11 +535,11 @@ def _stock_display_name(pack: dict[str, Any]) -> str:
 def _summary(pack: dict[str, Any], scorecard: dict[str, Any]) -> str:
     rating = scorecard["rating"]
     mapping = {
-        "strong_watch": "偏强，值得继续重点跟踪。",
-        "watch": "中性偏强，可继续观察。",
+        "strong_watch": "明显偏强，重点跟踪。",
+        "watch": "偏强，继续观察。",
         "neutral": "中性，等待确认。",
-        "cautious": "中性偏弱，短期进攻性不足。",
-        "avoid": "偏弱，应优先关注风险释放。",
+        "cautious": "偏弱，谨慎观察。",
+        "avoid": "明显偏弱，优先规避风险。",
     }
     return mapping.get(rating, "中性，等待确认。")
 
@@ -538,6 +559,30 @@ def _conclusion_basis_lines(pack: dict[str, Any], scorecard: dict[str, Any]) -> 
     if money:
         lines.append(f"- **资金流**：当日净流入={money.get('net_amount')}，5日净流入={money.get('net_amount_5d')}。")
     return "\n".join(lines[:5])
+
+
+def _evidence_table(scorecard: dict[str, Any]) -> str:
+    evidence = scorecard.get("evidence") or {}
+    rows = [
+        ("bullish_evidence", "偏多证据", evidence.get("bullish_evidence") or []),
+        ("bearish_evidence", "偏空证据", evidence.get("bearish_evidence") or []),
+        ("neutral_evidence", "中性证据", evidence.get("neutral_evidence") or []),
+    ]
+    lines = ["| 类型 | 字段 | 证据 |", "| --- | --- | --- |"]
+    for key, label, items in rows:
+        lines.append(f"| {label} | `{key}` | {'；'.join(items) if items else '暂无'} |")
+    return "\n".join(lines)
+
+
+def _watchlist_reason(scorecard: dict[str, Any], evidence: dict[str, Any]) -> str:
+    rating = scorecard.get("rating")
+    bullish = evidence.get("bullish_evidence") or []
+    bearish = evidence.get("bearish_evidence") or []
+    if rating in {"strong_watch", "watch"}:
+        return f"优先级靠前，主要支撑为{'；'.join(bullish[:3]) or '总分相对靠前'}。"
+    if rating in {"cautious", "avoid"}:
+        return f"优先级靠后，主要拖累为{'；'.join(bearish[:3]) or '风险项或分项评分偏弱'}。"
+    return "维持中性观察，等待趋势、量价或基本面证据进一步确认。"
 
 
 def _ma_structure(pack: dict[str, Any]) -> str:
@@ -603,6 +648,32 @@ def _position_volume_price_lines(pack: dict[str, Any], position: dict[str, Any] 
             f"- **量价结论**：{vp.get('verdict')}，置信度 {vp.get('confidence')}。",
             f"- **对持仓的含义**：{'、'.join(signals[:3]) if signals else '暂无明确量价强化信号'}。",
             f"- **需重点复核**：{'；'.join(risks) if risks else '暂无突出的量价风险'}。",
+        ]
+    )
+
+
+def _position_status_lines(pack: dict[str, Any], scorecard: dict[str, Any], position: dict[str, Any] | None) -> str:
+    if not position:
+        return "- **状态**：未提供持仓信息。"
+    cost = position.get("cost_price")
+    close = (pack.get("quote") or {}).get("close")
+    diff = round((close / cost - 1) * 100, 2) if cost and close else None
+    rating = scorecard.get("rating")
+    if diff is None:
+        state = "成本或收盘价缺失，无法计算相对成本状态。"
+    elif diff >= 8 and rating in {"strong_watch", "watch"}:
+        state = "持仓处于盈利且结构偏强，重点观察趋势延续和量价风险。"
+    elif diff >= 0:
+        state = "持仓略有浮盈或接近成本，等待量价和趋势进一步确认。"
+    elif rating in {"cautious", "avoid"}:
+        state = "持仓浮亏且评级偏弱，需优先复核风险释放情况。"
+    else:
+        state = "持仓低于成本，但综合评级未明显恶化，继续观察关键证据变化。"
+    return "\n".join(
+        [
+            f"- **相对成本状态**：当前收盘价相对成本 {diff}%。",
+            f"- **综合评级约束**：{rating}，{_summary(pack, scorecard)}",
+            f"- **状态判断**：{state}",
         ]
     )
 

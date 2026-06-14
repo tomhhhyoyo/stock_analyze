@@ -33,7 +33,9 @@ export TUSHARE_TOKEN=your_token
 
 ## 数据范围
 
-当前数据全部通过 Tushare 获取：
+生产分析必须先设置 `TUSHARE_TOKEN` 并启动 Tushare 主流程；AkShare 仅作为个别 Tushare 接口权限不足、限频或覆盖不足后的公开数据兜底，不能作为无 token 启动路径。
+
+Tushare 主数据包括：
 
 - 日线行情：`daily`
 - 复权因子：`adj_factor`，与 `daily` 合并生成 `qfq_open`、`qfq_high`、`qfq_low`、`qfq_close`，技术指标优先使用前复权价格计算
@@ -49,10 +51,11 @@ export TUSHARE_TOKEN=your_token
 - 市场情绪：优先 `limit_list_d`，降级 `limit_list_ths`，再降级 `stk_limit` + `daily` 近似计算
 - 股票名称映射：`stock_basic`
 
-Tushare 仍是强制主数据源，AkShare 不能单独启动生产分析。只有在 `TUSHARE_TOKEN` 已设置、Tushare 主流程已启动后，若个别接口因权限不足或接口覆盖问题不可用，项目才会尝试 AkShare 公开数据作为兜底，并在 `market_pack.json` 中明确写入 `source=akshare.*`：
+只有在 `TUSHARE_TOKEN` 已设置、Tushare 主流程已启动后，若个别接口因权限不足或接口覆盖问题不可用，项目才会尝试 AkShare 公开数据作为兜底，并在 `market_pack.json` 中明确写入 `source=akshare.*`：
 
-- 公告兜底：`stock_individual_notice_report`
-- 申万行业指数兜底：`index_hist_sw`
+- 公告兜底：AkShare `stock_individual_notice_report`
+- 申万行业指数兜底：AkShare `index_hist_sw`
+- 涨跌停情绪兜底：AkShare 东方财富涨停池、炸板池、跌停池
 
 已在 `market_pack.json` 中预留但可为空的 Tushare 字段：
 
@@ -93,7 +96,7 @@ export TUSHARE_RETRY_DELAYS=2,5,10
 - `risk_flags`
 - `trace`
 
-`raw_data.json` 只保存规范化后的原始数据快照，用于审计，不包含 token 或密钥；派生结论如 `volume_price` 只写入 `market_pack.json`。
+`raw_data.json` 保存规范化后的原始数据快照，用于审计，不包含 token 或密钥；包含 `daily`、`daily_basic`、`financials`、`moneyflow`、`market_context`、`market_sentiment`、`volume_price` 的当次快照。
 
 ## 使用
 
@@ -194,11 +197,11 @@ output/watchlist_report.html
 
 只输出研究观察评级：
 
-- `strong_watch`：偏强，重点跟踪
-- `watch`：中性偏强，继续观察
+- `strong_watch`：明显偏强，重点跟踪
+- `watch`：偏强，继续观察
 - `neutral`：中性，等待确认
-- `cautious`：中性偏弱，谨慎观察
-- `avoid`：偏弱，优先规避风险
+- `cautious`：偏弱，谨慎观察
+- `avoid`：明显偏弱，优先规避风险
 
 不输出 `buy` / `sell` / 目标价。
 
