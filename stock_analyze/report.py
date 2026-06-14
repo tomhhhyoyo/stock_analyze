@@ -582,7 +582,7 @@ def _volume_price_lines(pack: dict[str, Any]) -> str:
             f"- **价格位置**：5日涨跌幅={metrics.get('price_change_5d')}%，20日涨跌幅={metrics.get('price_change_20d')}%，20日区间位置={metrics.get('close_position_in_range')}，量价相关={metrics.get('volume_price_corr_20d')}。",
             f"- **K线结构**：上影线比例={metrics.get('upper_shadow_ratio')}，下影线比例={metrics.get('lower_shadow_ratio')}。",
             f"- **识别信号**：{'、'.join(signals) if signals else '暂无强量价信号'}。",
-            f"- **量价风险**：{'；'.join(risks) if risks else '暂无突出的量价风险'}。",
+            f"- **量价风险**：{'；'.join(risks) if risks else '暂无突出的量价风险'}",
             f"- **数据依据**：{'；'.join(basis)}。",
         ]
     )

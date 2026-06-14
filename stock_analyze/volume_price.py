@@ -188,7 +188,11 @@ def _risks(metrics: dict[str, Any], signals: list[str]) -> list[str]:
 def _summary(verdict: str, signals: list[str], risks: list[str]) -> str:
     sig = "、".join(signals[:3]) if signals else "暂无强信号"
     risk = "；".join(risks[:2]) if risks else "未识别到突出的量价风险"
-    return f"量价结论为{verdict}，主要信号：{sig}；风险提示：{risk}。"
+    return f"量价结论为{verdict}，主要信号：{sig}；风险提示：{_sentence(risk)}"
+
+
+def _sentence(text: str) -> str:
+    return text if text.endswith(("。", "！", "？")) else f"{text}。"
 
 
 def _confidence(metrics: dict[str, Any], moneyflow: dict[str, Any], market_sentiment: dict[str, Any]) -> str:
