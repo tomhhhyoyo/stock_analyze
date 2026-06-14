@@ -29,7 +29,7 @@ python3 -m venv .venv
 export TUSHARE_TOKEN=your_token
 ```
 
-未设置 `TUSHARE_TOKEN` 时，程序会直接失败并提示设置环境变量；不会使用其他行情源回退。
+未设置 `TUSHARE_TOKEN` 时，程序会直接失败并提示设置环境变量；不会使用 AkShare 或其他行情源绕过 token 要求。
 
 ## 数据范围
 
@@ -48,7 +48,7 @@ export TUSHARE_TOKEN=your_token
 - 市场情绪：优先 `limit_list_d`，降级 `limit_list_ths`，再降级 `stk_limit` + `daily` 近似计算
 - 股票名称映射：`stock_basic`
 
-Tushare 仍是主数据源。若 Tushare 个别接口因权限不足或接口覆盖问题不可用，项目会尝试 AkShare 公开数据作为兜底，并在 `market_pack.json` 中明确写入 `source=akshare.*`：
+Tushare 仍是强制主数据源，AkShare 不能单独启动生产分析。只有在 `TUSHARE_TOKEN` 已设置、Tushare 主流程已启动后，若个别接口因权限不足或接口覆盖问题不可用，项目才会尝试 AkShare 公开数据作为兜底，并在 `market_pack.json` 中明确写入 `source=akshare.*`：
 
 - 公告兜底：`stock_individual_notice_report`
 - 申万行业指数兜底：`index_hist_sw`

@@ -88,6 +88,7 @@ description: 使用中文命令和自然语言输入，对用户指定的 A 股�
 
 ## 数据缺口处理
 
+- 生产分析必须先设置 `TUSHARE_TOKEN`；AkShare 不能作为无 token 启动路径。
 - Tushare 限频、超时、临时连接失败默认按 `TUSHARE_RETRY_DELAYS=1,3` 秒等待重试，可通过环境变量调整。
 - 权限不足、接口不存在不做无意义重试，必须尝试同源兜底、AkShare 公开数据兜底或缓存。
 - 公告 `anns_d` 不可用时，优先用 AkShare `stock_individual_notice_report`，再用 `disclosure_date` 生成财报披露事件。

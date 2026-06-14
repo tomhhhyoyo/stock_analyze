@@ -272,5 +272,5 @@ def test_market_pack_records_extended_financial_and_limit_risks(tmp_path: Path):
 def test_default_provider_requires_tushare_token(monkeypatch):
     monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
 
-    with pytest.raises(RuntimeError, match="TUSHARE_TOKEN 未设置"):
+    with pytest.raises(RuntimeError, match="AkShare 只能作为 Tushare 权限不足后的兜底源"):
         default_provider()

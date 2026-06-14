@@ -44,7 +44,7 @@ class TushareProvider:
     def __init__(self, token: str | None = None) -> None:
         self.token = token or os.environ.get("TUSHARE_TOKEN", "")
         if not self.token:
-            raise RuntimeError("TUSHARE_TOKEN 未设置，无法使用 Tushare 拉取数据。")
+            raise RuntimeError("TUSHARE_TOKEN 未设置，无法启动生产分析；AkShare 只能作为 Tushare 权限不足后的兜底源。")
         import tushare as ts
 
         self.pro = ts.pro_api(self.token)
