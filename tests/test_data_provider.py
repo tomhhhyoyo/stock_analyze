@@ -130,6 +130,64 @@ def test_fetch_industry_context_falls_back_to_akshare_sw_index(tmp_path, monkeyp
     assert industry["pct_chg"] == 2.5641
 
 
+class MarketContextFallbackPro:
+    def index_daily(self, **kwargs):
+        if kwargs["ts_code"] == "399001.SZ":
+            raise ConnectionError("index failed")
+        return pd.DataFrame(
+            [
+                {
+                    "ts_code": kwargs["ts_code"],
+                    "trade_date": "20260601",
+                    "close": 100.0,
+                    "pct_chg": 0.1,
+                    "vol": 1000,
+                    "amount": 10000,
+                },
+                {
+                    "ts_code": kwargs["ts_code"],
+                    "trade_date": "20260602",
+                    "close": 101.0,
+                    "pct_chg": 1.0,
+                    "vol": 1100,
+                    "amount": 12000,
+                },
+            ]
+        )
+
+    def limit_list_d(self, **kwargs):
+        return pd.DataFrame([{"trade_date": kwargs["trade_date"], "ts_code": "000001.SZ", "limit": "U"}])
+
+    def index_member_all(self, **kwargs):
+        return pd.DataFrame()
+
+
+def test_fetch_market_context_falls_back_to_akshare_index_without_gap(tmp_path, monkeypatch):
+    monkeypatch.setattr(data_provider, "CACHE_DIR", tmp_path / "data_cache")
+    monkeypatch.setattr(data_provider, "INDUSTRY_INDEX_MAP_PATH", tmp_path / "missing.json")
+    monkeypatch.setenv("TUSHARE_RETRY_DELAYS", "0")
+    fake_ak = SimpleNamespace(
+        stock_zh_index_daily_em=lambda **kwargs: pd.DataFrame(
+            [
+                {"date": date(2026, 6, 1), "close": 200.0, "amount": 20000},
+                {"date": date(2026, 6, 2), "close": 202.0, "amount": 23000},
+            ]
+        )
+    )
+    monkeypatch.setattr(data_provider, "_load_akshare", lambda: fake_ak)
+
+    provider = TushareProvider.__new__(TushareProvider)
+    provider.pro = MarketContextFallbackPro()
+
+    context = provider.fetch_market_context("2026-06-02", "601127.SH")
+
+    sz_index = next(item for item in context["indices"] if item["ts_code"] == "399001.SZ")
+    assert sz_index["source"] == "akshare.stock_zh_index_daily_em"
+    assert sz_index["data_quality"] == "fallback"
+    assert sz_index["close"] == 202.0
+    assert not any(str(gap).startswith("index_daily:399001.SZ") for gap in context["gaps"])
+
+
 class DisclosureFallbackPro:
     def anns_d(self, **kwargs):
         raise RuntimeError("没有权限")

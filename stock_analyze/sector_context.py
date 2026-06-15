@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import json
+from datetime import datetime
+from pathlib import Path
 from typing import Any
+
+CACHE_DIR = Path("data_cache")
 
 
 def analyze_sector_context(
@@ -15,7 +20,7 @@ def analyze_sector_context(
     sector_members = _akshare_sector_members(industry)
     if not sector_members:
         data_gaps.append("sector_member_missing")
-    sector_sentiment = _akshare_sector_sentiment(industry, sector_members)
+    sector_sentiment = _akshare_sector_sentiment(industry, sector_members) or _market_sentiment_proxy(market_context, industry)
     if not sector_sentiment:
         data_gaps.append("sector_sentiment_missing")
 
@@ -171,6 +176,25 @@ def _akshare_sector_sentiment(industry: dict[str, Any], sector_members: dict[str
     }
 
 
+def _market_sentiment_proxy(market_context: dict[str, Any], industry: dict[str, Any]) -> dict[str, Any]:
+    sentiment = market_context.get("sentiment") or {}
+    up = _num(sentiment.get("up_limit_count") or sentiment.get("limit_up_count"))
+    down = _num(sentiment.get("down_limit_count") or sentiment.get("limit_down_count"))
+    breaks = _num(sentiment.get("limit_break_count"))
+    if up is None and down is None and breaks is None:
+        return {}
+    return {
+        "up_limit_count": int(up or 0),
+        "down_limit_count": int(down or 0),
+        "limit_break_count": int(breaks or 0),
+        "limit_break_rate": sentiment.get("limit_break_rate"),
+        "source": "market_sentiment_proxy",
+        "sector_name": industry.get("name") or "",
+        "data_quality": "proxy",
+        "limit_calc_note": "板块成分实时行情不可用时，使用全市场涨跌停情绪作为代理值；该字段不等同于真实板块成分统计。",
+    }
+
+
 def _safe_pool_rows(ak: Any, func_name: str, sector_name: str, member_codes: set[str]) -> list[dict[str, Any]]:
     func = getattr(ak, func_name, None)
     if func is None:
@@ -198,9 +222,14 @@ def _akshare_spot_limit_stats(member_codes: set[str]) -> dict[str, Any]:
             rows = _records(func())
             if rows:
                 source = f"akshare.{func_name}"
+                _write_spot_cache(rows, source)
                 break
         except Exception:  # noqa: BLE001 - 单个 AkShare 行情源失败时尝试下一个公开源
             continue
+    if not rows:
+        cached = _read_spot_cache()
+        rows = cached.get("rows") or []
+        source = cached.get("source") or "akshare.spot_cache"
     if not rows:
         return {}
     up = 0
@@ -222,6 +251,28 @@ def _akshare_spot_limit_stats(member_codes: set[str]) -> dict[str, Any]:
     if matched == 0:
         return {}
     return {"up_limit_count": up, "down_limit_count": down, "matched_count": matched, "source": source}
+
+
+def _read_spot_cache() -> dict[str, Any]:
+    path = CACHE_DIR / "akshare_stock_zh_a_spot.json"
+    try:
+        if not path.exists():
+            return {}
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and isinstance(data.get("rows"), list):
+            return data
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return {}
+
+
+def _write_spot_cache(rows: list[dict[str, Any]], source: str) -> None:
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        payload = {"source": source, "updated_at": datetime.now().isoformat(timespec="seconds"), "rows": [_json_safe(row) for row in rows]}
+        (CACHE_DIR / "akshare_stock_zh_a_spot.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        return
 
 
 def _filter_sector(rows: list[dict[str, Any]], sector_name: str, member_codes: set[str]) -> list[dict[str, Any]]:

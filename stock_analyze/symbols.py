@@ -71,15 +71,20 @@ def load_symbol_cache(path: str | Path | None = None) -> dict[str, list[str]]:
     for name, value in items:
         if not name or not value:
             continue
-        result.setdefault(name, [])
+        names = [name]
+        normalized_name = normalize_stock_name(name)
+        if normalized_name and normalized_name not in names:
+            names.append(normalized_name)
         values = value if isinstance(value, list) else [value]
         for symbol in values:
             try:
                 normalized = normalize_symbol(str(symbol))
             except ValueError:
                 continue
-            if normalized not in result[name]:
-                result[name].append(normalized)
+            for candidate_name in names:
+                result.setdefault(candidate_name, [])
+                if normalized not in result[candidate_name]:
+                    result[candidate_name].append(normalized)
     return result
 
 
@@ -89,7 +94,7 @@ def refresh_symbol_cache(stock_list: list[dict[str, Any]], path: str | Path | No
     rows = []
     seen: set[tuple[str, str]] = set()
     for item in stock_list:
-        name = str(item.get("name") or "").strip()
+        name = normalize_stock_name(str(item.get("name") or "").strip())
         ts_code = str(item.get("ts_code") or item.get("symbol") or "").strip()
         if not name or not ts_code:
             continue
@@ -145,7 +150,8 @@ def lookup_symbol_by_name(name: str, cache: dict[str, list[str]] | None = None) 
         for value in values:
             if value not in merged[key]:
                 merged[key].append(value)
-    matched = [(key, values) for key, values in merged.items() if key and key in name]
+    query = normalize_stock_name(name)
+    matched = [(key, values) for key, values in merged.items() if key and (key in query or normalize_stock_name(key) in query)]
     symbols = []
     for _, values in matched:
         symbols.extend(values)
@@ -163,7 +169,7 @@ def lookup_name_by_symbol(symbol: str, cache: dict[str, list[str]] | None = None
         for value in values:
             if value not in merged[key]:
                 merged[key].append(value)
-    matches = [name for name, values in merged.items() if normalized in values]
+    matches = [normalize_stock_name(name) for name, values in merged.items() if normalized in values]
     return matches[0] if matches else None
 
 
@@ -185,3 +191,12 @@ def extract_symbols(text: str, cache_path: str | Path | None = None) -> list[str
         if symbol:
             found.append(symbol)
     return found
+
+
+def normalize_stock_name(name: str) -> str:
+    value = str(name or "").strip()
+    # Tushare stock_basic 在除权除息等交易日可能返回 XD/XR/DR 前缀；报告和名称解析使用常态股票名。
+    for prefix in ("XD", "XR", "DR"):
+        if value.upper().startswith(prefix) and len(value) > len(prefix):
+            return value[len(prefix) :].strip()
+    return value

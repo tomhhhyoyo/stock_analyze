@@ -2,7 +2,7 @@ from datetime import date
 import json
 
 from stock_analyze.parser import normalize_symbol, parse_user_request
-from stock_analyze.symbols import extract_symbols, refresh_symbol_cache
+from stock_analyze.symbols import extract_symbols, lookup_name_by_symbol, refresh_symbol_cache
 
 
 def test_parse_single_stock_request():
@@ -79,3 +79,14 @@ def test_refresh_symbol_cache_normalizes_tushare_rows(tmp_path):
     )
 
     assert extract_symbols("中国电信、平安银行", cache_path=cache_path) == ["601728.SH", "000001.SZ"]
+
+
+def test_symbol_cache_strips_temporary_xd_prefix(tmp_path):
+    cache_path = refresh_symbol_cache(
+        [{"name": "XD赛力斯", "ts_code": "601127.SH", "symbol": "601127", "market": "主板"}],
+        tmp_path / "symbol_cache.json",
+    )
+
+    assert extract_symbols("/股票 分析赛力斯", cache_path=cache_path) == ["601127.SH"]
+    cache = {"赛力斯": ["601127.SH"]}
+    assert lookup_name_by_symbol("601127.SH", cache) == "赛力斯"

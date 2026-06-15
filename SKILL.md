@@ -88,7 +88,7 @@ description: 使用中文命令和自然语言输入，对用户指定的 A 股�
 - `risk_flags`：自动风险标记。
 - `trace`：关键数值来源说明。
 
-`raw_data.json` 保存规范化后的原始数据快照，用于审计；不得包含 token、secret、cookie；包含 `daily`、`daily_basic`、`financials`、`moneyflow`、`market_context`、`market_sentiment`、`volume_price` 的当次快照。
+`raw_data.json` 保存规范化后的原始数据快照，用于审计；不得包含 token、secret、cookie；包含 `daily`、`daily_basic`、`financials`、`moneyflow`、`market_context`、`market_sentiment`、`volume_price`、`market_regime`、`sector_context`、`tushare_extensions` 的当次快照。
 
 ## 数据缺口处理
 
@@ -177,16 +177,16 @@ output/{中文名（symbol）}/report.html
 - 中性偏弱，谨慎观察
 - 偏弱，优先规避风险
 
-内部 `scorecard.json` 会保存 `rating_code` 和 `rating_label`，用户可见报告只展示中文 `rating_label`。
+内部 `scorecard.json` 会保存 `rating_code` 和 `rating_label`。英文 `strong_watch`、`watch`、`neutral`、`cautious`、`avoid` 只作为 `rating_code` 内部字段；用户可见报告只展示中文 `rating_label`，且 `scorecard.rating` 与 `scorecard.rating_label` 保持一致。
 
 默认评分权重：
 
-- 趋势结构：25%
-- 量价关系：20%
-- 基本面质量：20%
-- 估值位置：15%
+- 趋势结构：24%
+- 量价关系：23%
+- 基本面质量：18%
+- 估值位置：12%
 - 资金流：10%
-- 风险事件：10%
+- 风险事件：13%
 
 禁止输出：
 

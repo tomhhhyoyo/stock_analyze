@@ -68,8 +68,10 @@ def test_run_single_stock_analysis(tmp_path: Path):
     result = run_analysis("/股票 分析 600519.SH，最近两年", tmp_path, provider)
     output_dir = tmp_path / "贵州茅台（600519.SH）"
 
-    assert result["results"][0]["scorecard"]["rating_code"] in {"strong_watch", "watch", "neutral", "cautious", "avoid"}
-    assert result["results"][0]["scorecard"]["rating"] == result["results"][0]["scorecard"]["rating_label"]
+    scorecard = result["results"][0]["scorecard"]
+    assert scorecard["rating_code"] in {"strong_watch", "watch", "neutral", "cautious", "avoid"}
+    assert scorecard["rating_label"] in {"偏强，重点跟踪", "中性偏强，继续观察", "中性，等待确认", "中性偏弱，谨慎观察", "偏弱，优先规避风险"}
+    assert scorecard["rating"] == scorecard["rating_label"]
     assert result["results"][0]["report_path"].endswith("贵州茅台（600519.SH）/report.html")
     assert result["results"][0]["markdown_report_path"].endswith("贵州茅台（600519.SH）/report.md")
     assert (output_dir / "market_pack.json").exists()
@@ -85,6 +87,10 @@ def test_run_single_stock_analysis(tmp_path: Path):
     assert pack["market_context"]["indices"][0]["name"] == "上证指数"
     assert pack["announcements"][0]["title"] == "一季度报告"
     assert "data_contract" in pack
+    assert "volume_price" in pack["data_contract"]["required_sections"]
+    assert "market_regime" in pack["data_contract"]["required_sections"]
+    assert "sector_context" in pack["data_contract"]["required_sections"]
+    assert "tushare_extensions" in pack["data_contract"]["required_sections"]
     assert "data_audit" in pack
     assert "volume_price" in pack
     assert "market_regime" in pack
@@ -123,9 +129,9 @@ def test_run_single_stock_analysis(tmp_path: Path):
     assert "公告与事件风险" in report
     assert "市场情绪与涨跌停结构" in report
     dossier = (output_dir / "decision_dossier.md").read_text(encoding="utf-8")
-    for visible_text in [report, dossier]:
-        assert not re.search(r"\b(strong_watch|watch|neutral|cautious|avoid)\b", visible_text)
     html = (output_dir / "report.html").read_text(encoding="utf-8")
+    for visible_text in [report, dossier, html]:
+        assert not re.search(r"\b(strong_watch|watch|neutral|cautious|avoid)\b", visible_text)
     assert "<!doctype html>" in html
     assert "<title>贵州茅台（600519.SH）中文多维研究报告</title>" in html
     assert "贵州茅台（600519.SH）中文多维研究报告" in html
@@ -241,6 +247,37 @@ def test_pipeline_keeps_running_when_market_sentiment_warns(tmp_path: Path):
     assert scores["fundamental"] is not None
 
 
+def test_pipeline_scorecard_is_regime_adjusted(tmp_path: Path):
+    provider = StaticProvider(
+        _bars(),
+        {
+            "source": "static",
+            "financials": {
+                "source": "static",
+                "latest": {"revenue_growth_yoy": 10, "net_profit_growth_yoy": 20, "roe": 15, "pe_ttm": 20, "pb": 2},
+                "gaps": [],
+            },
+            "moneyflow": {"source": "static", "latest": {"net_amount_5d": 20}, "gaps": []},
+            "market_context": {
+                "source": "static",
+                "indices": [{"name": "上证指数", "trade_date": "2026-05-24", "close": 3000, "pct_chg": -2.0}],
+                "industry": {"status": "not_configured"},
+                "sentiment": {"up_limit_count": 1, "down_limit_count": 20, "limit_break_count": 0, "limit_break_rate": 0},
+                "gaps": [],
+            },
+        },
+    )
+
+    result = run_analysis("/股票 分析 600519.SH，最近两年", tmp_path, provider)
+
+    scorecard = result["results"][0]["scorecard"]
+    assert "rating_code_before_adjustment" in scorecard
+    assert "rating_label_before_adjustment" in scorecard
+    assert scorecard["rating_adjustments"]
+    assert any("risk_off" in item["message"] for item in scorecard["rating_adjustments"])
+    assert scorecard["rating"] == scorecard["rating_label"]
+
+
 def test_market_pack_records_extended_financial_and_limit_risks(tmp_path: Path):
     bars = _bars()
     bars[-1] = DailyBar(
@@ -316,19 +353,42 @@ def test_default_provider_requires_tushare_token(monkeypatch):
         default_provider()
 
 
+def test_scoring_weights_contract():
+    config = json.loads(Path("config/scoring_weights.json").read_text(encoding="utf-8"))
+
+    assert round(sum(config["weights"].values()), 6) == 1
+    assert config["weights"]["volume_price"] == 0.23
+    assert config["weights"]["risk"] == 0.13
+    assert config["rating_thresholds"] == {
+        "strong_watch": 80,
+        "watch": 68,
+        "neutral": 54,
+        "cautious": 42,
+    }
+
+
 def test_readme_and_skill_rating_and_fallback_contract_are_consistent():
     readme = Path("README.md").read_text(encoding="utf-8")
     skill = Path("SKILL.md").read_text(encoding="utf-8")
     combined = readme + "\n" + skill
 
     assert "当前数据全部通过 Tushare 获取" not in combined
+    assert "watch/neutral/avoid" not in readme
+    assert "watch / neutral / avoid" not in readme
+    assert "旧三档" not in readme
     assert "偏强，重点跟踪" in combined
     assert "中性偏强，继续观察" in combined
     assert "中性，等待确认" in combined
     assert "中性偏弱，谨慎观察" in combined
     assert "偏弱，优先规避风险" in combined
+    assert "英文 `strong_watch`、`watch`、`neutral`、`cautious`、`avoid` 只作为 `rating_code` 内部字段" in readme
+    assert "volume_price" in readme
     assert "market_regime" in combined
     assert "sector_context" in combined
+    assert "tushare_extensions" in readme
     assert "/复盘" in combined
     assert "TUSHARE_TOKEN" in combined
     assert "AkShare 仅作为" in readme
+    assert "无条件止损价" in readme
+    assert "个人持仓分析" in readme
+    assert "自选池筛选" in readme

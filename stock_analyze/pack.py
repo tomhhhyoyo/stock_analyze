@@ -120,6 +120,7 @@ def build_market_pack(request: AnalysisRequest, symbol: str, provider: MarketDat
                 "indicators",
                 "volume_price",
                 "fundamental",
+                "tushare_extensions",
                 "moneyflow",
                 "market_context",
                 "market_sentiment",

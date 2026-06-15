@@ -12,6 +12,14 @@ from .sentiment import fetch_market_sentiment
 
 CACHE_DIR = Path("data_cache")
 INDUSTRY_INDEX_MAP_PATH = Path("config/industry_index_map.json")
+INDEX_AK_SYMBOLS = {
+    "000001.SH": "sh000001",
+    "399001.SZ": "sz399001",
+    "399006.SZ": "sz399006",
+    "000300.SH": "sh000300",
+    "000905.SH": "sh000905",
+    "000852.SH": "sh000852",
+}
 
 
 class MarketDataProvider(Protocol):
@@ -488,40 +496,11 @@ class TushareProvider:
             ("000905.SH", "中证500"),
             ("000852.SH", "中证1000"),
         ]:
-            df = _safe_df(
-                lambda ts_code=ts_code: self.pro.index_daily(
-                    ts_code=ts_code,
-                    start_date=start,
-                    end_date=end,
-                    fields="ts_code,trade_date,close,pct_chg,vol,amount",
-                ),
-                f"index_daily:{ts_code}",
-                gaps,
-            )
-            if df is not None and not df.empty:
-                sorted_df = df.sort_values("trade_date")
-                row = sorted_df.iloc[-1].to_dict()
-                indices.append(
-                    {
-                        "ts_code": ts_code,
-                        "name": name,
-                        "trade_date": _fmt_trade_date(str(row.get("trade_date", ""))),
-                        "close": _num(row.get("close")),
-                        "pct_chg": _num(row.get("pct_chg")),
-                        "amount": _num(row.get("amount")),
-                        "volume": _num(row.get("vol")),
-                        "history": [
-                            {
-                                "trade_date": _fmt_trade_date(str(item.get("trade_date", ""))),
-                                "close": _num(item.get("close")),
-                                "pct_chg": _num(item.get("pct_chg")),
-                                "amount": _num(item.get("amount")),
-                                "volume": _num(item.get("vol")),
-                            }
-                            for item in sorted_df.tail(80).to_dict("records")
-                        ],
-                    }
-                )
+            row = self._fetch_index_context(ts_code, name, start, end)
+            if row:
+                indices.append(row)
+            else:
+                gaps.append(f"index_daily:{ts_code}_unavailable")
         sentiment = fetch_market_sentiment(self.pro, end)
         industry = self._fetch_industry_context(symbol, end, gaps)
         return {
@@ -531,6 +510,57 @@ class TushareProvider:
             "sentiment": sentiment,
             "gaps": gaps,
         }
+
+    def _fetch_index_context(self, ts_code: str, name: str, start: str, end: str) -> dict[str, Any] | None:
+        cache_key = f"index_context_{ts_code}_{end}"
+        cached = _read_cache(cache_key)
+        if cached:
+            return cached
+        primary_gaps: list[str] = []
+        df = _safe_df(
+            lambda: self.pro.index_daily(
+                ts_code=ts_code,
+                start_date=start,
+                end_date=end,
+                fields="ts_code,trade_date,close,pct_chg,vol,amount",
+            ),
+            f"index_daily:{ts_code}",
+            primary_gaps,
+        )
+        row = _index_context_from_records(ts_code, name, _records(df), "tushare.index_daily")
+        if row:
+            _write_cache(cache_key, row)
+            return row
+        row = self._fetch_akshare_index_context(ts_code, name, end)
+        if row:
+            _write_cache(cache_key, row)
+            return row
+        cached_latest = _read_latest_cache_prefix(f"index_context_{ts_code}_")
+        if cached_latest:
+            cached_latest["data_quality"] = "cached_stale"
+            cached_latest["note"] = "本次宽基指数接口不可用，已使用本地历史缓存。"
+            return cached_latest
+        return None
+
+    def _fetch_akshare_index_context(self, ts_code: str, name: str, end: str) -> dict[str, Any] | None:
+        symbol = INDEX_AK_SYMBOLS.get(ts_code)
+        if not symbol:
+            return None
+        df = _safe_df(
+            lambda: _load_akshare().stock_zh_index_daily_em(symbol=symbol),
+            f"akshare.stock_zh_index_daily_em:{symbol}",
+            [],
+        )
+        target = date.fromisoformat(_fmt_trade_date(end))
+        records = []
+        for row in _records(df):
+            row_date = _parse_any_date(row.get("date") or row.get("日期") or row.get("trade_date"))
+            if row_date and row_date <= target:
+                item = dict(row)
+                item["trade_date"] = row_date.strftime("%Y%m%d")
+                records.append(item)
+        records.sort(key=lambda item: str(item.get("trade_date") or ""))
+        return _index_context_from_records(ts_code, name, records, "akshare.stock_zh_index_daily_em", data_quality="fallback")
 
     def _fetch_industry_context(self, symbol: str | None, trade_date: str, gaps: list[str]) -> dict:
         mapping = self._resolve_industry_index(symbol, gaps)
@@ -769,6 +799,18 @@ def _num(value):
         return None
 
 
+def _records(df: Any) -> list[dict[str, Any]]:
+    if df is None:
+        return []
+    if hasattr(df, "empty") and df.empty:
+        return []
+    if hasattr(df, "to_dict"):
+        return list(df.to_dict("records"))
+    if isinstance(df, list):
+        return [item for item in df if isinstance(item, dict)]
+    return []
+
+
 def _latest_adj_factor(adj_by_date: dict[str, float]) -> float | None:
     if not adj_by_date:
         return None
@@ -781,6 +823,54 @@ def _qfq(value, ratio: float | None) -> float | None:
     if num is None or ratio is None:
         return None
     return round(num * ratio, 4)
+
+
+def _index_context_from_records(
+    ts_code: str,
+    name: str,
+    records: list[dict[str, Any]],
+    source: str,
+    data_quality: str | None = None,
+) -> dict[str, Any] | None:
+    if not records:
+        return None
+    rows = sorted(records, key=lambda item: str(item.get("trade_date") or item.get("date") or item.get("日期") or ""))
+    normalized = []
+    prev_close = None
+    for item in rows:
+        close = _num(item.get("close") or item.get("收盘"))
+        pct = _num(item.get("pct_chg") or item.get("涨跌幅"))
+        if pct is None:
+            pct = _pct_change(close, prev_close)
+        normalized.append(
+            {
+                "trade_date": _fmt_trade_date(str(item.get("trade_date") or item.get("date") or item.get("日期") or "")),
+                "close": close,
+                "pct_chg": pct,
+                "amount": _num(item.get("amount") or item.get("成交额")),
+                "volume": _num(item.get("vol") or item.get("volume") or item.get("成交量")),
+            }
+        )
+        if close is not None:
+            prev_close = close
+    valid = [item for item in normalized if item.get("trade_date")]
+    if not valid:
+        return None
+    latest = valid[-1]
+    result = {
+        "ts_code": ts_code,
+        "name": name,
+        "trade_date": latest.get("trade_date"),
+        "close": latest.get("close"),
+        "pct_chg": latest.get("pct_chg"),
+        "amount": latest.get("amount"),
+        "volume": latest.get("volume"),
+        "history": valid[-80:],
+        "source": source,
+    }
+    if data_quality:
+        result["data_quality"] = data_quality
+    return result
 
 
 def _estimate_limit_prices(symbol: str, row: dict[str, Any], previous_close: float | None = None) -> dict[str, float | None]:

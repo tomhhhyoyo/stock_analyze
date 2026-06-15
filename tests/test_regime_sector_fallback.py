@@ -65,3 +65,33 @@ def test_sector_context_uses_akshare_member_and_sentiment_fallback(monkeypatch):
     assert result["sector_sentiment"]["down_limit_count"] == 0
     assert result["sector_sentiment"]["limit_break_count"] == 0
     assert "stock_zh_a_spot" in result["sector_sentiment"]["source"]
+
+
+def test_sector_context_uses_market_sentiment_proxy_when_member_quotes_unavailable(monkeypatch):
+    fake_ak = SimpleNamespace(
+        index_component_sw=lambda **kwargs: pd.DataFrame([{"证券代码": "601127", "证券名称": "赛力斯"}]),
+        stock_zt_pool_em=lambda: pd.DataFrame([]),
+        stock_zt_pool_zbgc_em=lambda: pd.DataFrame([]),
+        stock_zt_pool_dtgc_em=lambda: pd.DataFrame([]),
+        stock_zh_a_spot_em=lambda: pd.DataFrame([]),
+        stock_zh_a_spot=lambda: pd.DataFrame([]),
+    )
+    monkeypatch.setattr(sector_context, "_load_akshare", lambda: fake_ak)
+    monkeypatch.setattr(sector_context, "_read_spot_cache", lambda: {})
+    gaps = []
+
+    result = sector_context.analyze_sector_context(
+        {
+            "industry": {"status": "ok", "name": "汽车", "ts_code": "801880.SI", "close": 7000, "pct_chg": 1.0},
+            "sentiment": {"up_limit_count": 12, "down_limit_count": 3, "limit_break_count": 2, "limit_break_rate": 0.14},
+        },
+        [],
+        {"ret_20d_pct": -5.0},
+        gaps,
+    )
+
+    assert "sector_sentiment_missing" not in gaps
+    assert result["sector_sentiment"]["source"] == "market_sentiment_proxy"
+    assert result["sector_sentiment"]["up_limit_count"] == 12
+    assert result["sector_sentiment"]["down_limit_count"] == 3
+    assert result["sector_sentiment"]["data_quality"] == "proxy"

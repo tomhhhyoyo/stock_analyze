@@ -6,9 +6,12 @@ def test_load_scoring_config():
     config = load_scoring_config()
 
     assert round(sum(config["weights"].values()), 6) == 1
-    assert config["weights"]["volume_price"] == 0.2
-    assert config["rating_thresholds"]["strong_watch"] == 78
-    assert config["rating_thresholds"]["cautious"] == 40
+    assert config["weights"]["volume_price"] == 0.23
+    assert config["weights"]["risk"] == 0.13
+    assert config["rating_thresholds"]["strong_watch"] == 80
+    assert config["rating_thresholds"]["watch"] == 68
+    assert config["rating_thresholds"]["neutral"] == 54
+    assert config["rating_thresholds"]["cautious"] == 42
 
 
 def _pack(
@@ -81,7 +84,7 @@ def test_rating_can_downgrade_from_neutral_to_cautious_or_avoid():
 
 
 def test_five_rating_outputs_are_supported():
-    thresholds = {"strong_watch": 78, "watch": 66, "neutral": 52, "cautious": 40}
+    thresholds = {"strong_watch": 80, "watch": 68, "neutral": 54, "cautious": 42}
 
     assert _rating(80, thresholds) == "strong_watch"
     assert _rating(70, thresholds) == "watch"

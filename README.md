@@ -56,7 +56,7 @@ Tushare 主数据包括：
 
 - 公告兜底：AkShare `stock_individual_notice_report`
 - 申万行业指数兜底：AkShare `index_hist_sw`
-- 涨跌停情绪兜底：AkShare 东方财富涨停池、炸板池、跌停池
+- 涨跌停情绪兜底：AkShare 东方财富涨停池、炸板池、跌停池；板块情绪可继续降级为 AkShare 全市场实时行情 `stock_zh_a_spot`，按行业成分股日涨跌幅估算涨停/跌停数量
 
 已在 `market_pack.json` 中预留但可为空的 Tushare 字段：
 
@@ -73,7 +73,7 @@ export TUSHARE_RETRY_DELAYS=2,5,10
 
 权限不足、接口不存在这类错误不会无意义重试，会优先尝试同源兜底和 AkShare 公开数据兜底。例如公告 `anns_d` 权限不足时，会先尝试 AkShare 个股公告，再尝试 `disclosure_date` 生成财报披露事件；行业指数 `sw_daily` 不可用时，会尝试 `index_daily`、AkShare 申万指数和本地历史缓存。若仍不可用，必须继续写入 `data_gaps`，不能隐藏缺口或编造行业指数行情。
 
-市场情绪如果使用 `stk_limit` + `daily` 兜底，涨跌停状态由日线价格与涨跌停价近似计算，无法覆盖封板时间、封单金额和真实炸板次数。全部来源失败时，市场情绪只作为结构化 warning 记录，主报告和核心技术、估值、基本面分析继续生成。
+市场情绪如果使用 `stk_limit` + `daily` 或 `daily.pct_chg` 兜底，涨跌停状态由日线价格、涨跌停价或交易板涨跌幅阈值近似计算，无法覆盖封板时间、封单金额和真实炸板次数。全部来源失败时，市场情绪只作为结构化 warning 记录，主报告和核心技术、估值、基本面分析继续生成。
 
 ## 数据契约
 
@@ -100,6 +100,7 @@ export TUSHARE_RETRY_DELAYS=2,5,10
 - `trace`
 
 `raw_data.json` 保存规范化后的原始数据快照，用于审计，不包含 token 或密钥；包含 `daily`、`daily_basic`、`financials`、`moneyflow`、`market_context`、`market_sentiment`、`volume_price` 的当次快照。
+同时保存 `market_regime`、`sector_context`、`tushare_extensions` 的审计快照，便于追溯大盘环境、板块环境和预留接口字段来源。
 
 ## 使用
 
@@ -158,12 +159,12 @@ config/scoring_weights.json
 
 当前默认权重：
 
-- 趋势结构：25%
-- 量价关系：20%
-- 基本面质量：20%
-- 估值位置：15%
+- 趋势结构：24%
+- 量价关系：23%
+- 基本面质量：18%
+- 估值位置：12%
 - 资金流：10%
-- 风险事件：10%
+- 风险事件：13%
 
 股票中文名映射不再依赖少量手工字典。程序真实运行时会先通过 Tushare `stock_basic` 拉取当前上市 A 股基础列表，并生成本地缓存：
 
@@ -208,7 +209,7 @@ output/watchlist_report.html
 - 中性偏弱，谨慎观察
 - 偏弱，优先规避风险
 
-内部 `scorecard.json` 会保存 `rating_code` 和 `rating_label`，用户可见报告只展示中文 `rating_label`。
+内部 `scorecard.json` 会保存 `rating_code` 和 `rating_label`。英文 `strong_watch`、`watch`、`neutral`、`cautious`、`avoid` 只作为 `rating_code` 内部字段；用户可见报告只展示中文 `rating_label`，且 `scorecard.rating` 与 `scorecard.rating_label` 保持一致。
 
 不输出 `buy` / `sell` / 买入 / 卖出 / 加仓 / 清仓 / 目标价 / 无条件止损价。
 

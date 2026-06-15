@@ -1,17 +1,17 @@
 {
   "weights": {
-    "trend": 0.25,
-    "volume_price": 0.2,
-    "fundamental": 0.2,
-    "valuation": 0.15,
+    "trend": 0.24,
+    "volume_price": 0.23,
+    "fundamental": 0.18,
+    "valuation": 0.12,
     "moneyflow": 0.1,
-    "risk": 0.1
+    "risk": 0.13
   },
   "rating_thresholds": {
-    "strong_watch": 78,
-    "watch": 66,
-    "neutral": 52,
-    "cautious": 40
+    "strong_watch": 80,
+    "watch": 68,
+    "neutral": 54,
+    "cautious": 42
   },
   "risk_penalty_per_flag": 12,
   "gap_penalty": {
